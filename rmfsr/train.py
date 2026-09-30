@@ -56,6 +56,7 @@ def validation_selection_metric(cfg):
 
 def save_checkpoint(path, model, ema, optimizer, step, cfg, pairs, history, best=float('inf'), verified_inputs=None):
     data = dict(model=model.state_dict(), ema=ema.state_dict(), optimizer=optimizer.state_dict(),
+                architecture=model.architecture(),
                 step=step, config=cfg, torch_rng=torch.get_rng_state(),
                 numpy_rng=np.random.get_state(), python_rng=random.getstate(),
                 data_rng=pairs.rng.bit_generator.state, history=history[-1000:],
@@ -132,7 +133,9 @@ def train(cfg, run, resume=None):
     val_kwargs = {**kwargs, 'noise_dir': cfg.get('validation_noise_dir', cfg.get('noise_dir'))}
     validation = SpeechPairs(cfg['validation_manifest'], seed=seed + 1000, **val_kwargs)
     spectral = Spectral(cfg['sample_rate'])
-    model = RMFSR(channels=cfg['channels']).to(device)
+    model = RMFSR(channels=cfg['channels'],
+                  bottleneck_attention=cfg.get('bottleneck_attention', False),
+                  decoder_before_upsample=cfg.get('decoder_before_upsample', False)).to(device)
     ema = copy.deepcopy(model).eval().requires_grad_(False)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg['learning_rate'], weight_decay=.01)
     first, history, best = 0, [], float('inf')
@@ -165,6 +168,8 @@ def train(cfg, run, resume=None):
                 raise ValueError(f'Resume mismatch: {key}')
         if checkpoint['config'].get('inference_evaluations_to_compare', [1, 2, 5]) != cfg.get('inference_evaluations_to_compare', [1, 2, 5]):
             raise ValueError('Cannot change validation inference evaluations on resume')
+        if checkpoint.get('architecture') != model.architecture():
+            raise ValueError('Checkpoint uses an older or different decoder architecture; start a new run')
         model.load_state_dict(checkpoint['model'])
         ema.load_state_dict(checkpoint['ema'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -201,7 +206,7 @@ def train(cfg, run, resume=None):
         batches = iter(batch_loader(cfg['train_manifest'], kwargs, micro_cfg, first * accumulation))
     else:
         batches = (pairs.batch(cfg['batch_size']) for _ in range(first * accumulation, cfg['steps'] * accumulation))
-    manifest = dict(status='training', device=str(device), parameters=sum(p.numel() for p in model.parameters()),
+    manifest = dict(status='training', device=str(device), architecture=model.architecture(), parameters=sum(p.numel() for p in model.parameters()),
                     receptive_frames_per_evaluation=model.receptive_frames,
                     network_context_seconds=(model.receptive_frames - 1) * .01,
                     window_ms=20, paper_parameters=7800000, pilot=cfg['pilot'],

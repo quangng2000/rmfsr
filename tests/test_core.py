@@ -2,7 +2,7 @@ import json,tempfile,unittest
 from pathlib import Path
 import numpy as np
 import torch
-from rmfsr.model import RMFSR
+from rmfsr.model import RMFSR, model_from_checkpoint
 from rmfsr.spectral import Spectral
 from rmfsr.flow import sample,meanflow_loss,sample_times,expand
 from rmfsr.data import assert_disjoint
@@ -41,6 +41,56 @@ class ModelTests(unittest.TestCase):
         xt=(1-tt)*self.x+tt*self.y+tt*.3*e
         expected=(self.m(xt,self.y,self.t,self.t)-self.x).square().mean()
         torch.testing.assert_close(loss,expected)
+
+class ArchitectureTests(unittest.TestCase):
+    def test_default_decoder_mirrors_all_stage_outputs(self):
+        model = RMFSR()
+        self.assertEqual([b.project.conv.out_channels for b in model.decoder],
+                         [256,256,128,64,64])
+        self.assertEqual([b.channels for b in model.dec_attention], [256,256,128,64,64])
+        self.assertEqual(sum(p.numel() for p in model.parameters()), 6112710)
+
+    def test_capacity_study_keeps_widths_and_context(self):
+        baseline = RMFSR(); study = RMFSR(bottleneck_attention=True)
+        self.assertEqual([b.project.conv.out_channels for b in study.decoder],
+                         [256,256,128,64,64])
+        self.assertEqual(study.receptive_frames, baseline.receptive_frames)
+        self.assertEqual(sum(p.numel() for p in study.parameters()), 7431622)
+
+    def test_checkpoint_restores_recorded_architecture_options(self):
+        original = RMFSR(channels=(8,8,16,16,16), encoder_dilations=(1,1,2,4,8),
+                         tcn_dilations=(1,1,2,4), bottleneck_attention=True,
+                         decoder_before_upsample=True)
+        checkpoint = dict(config={'channels':[8,8,16,16,16]},
+                          architecture=original.architecture(), ema=original.state_dict())
+        loaded = model_from_checkpoint(checkpoint)
+        loaded.load_state_dict(checkpoint['ema'])
+        self.assertEqual(loaded.architecture(), original.architecture())
+        self.assertEqual(loaded.receptive_frames, original.receptive_frames)
+
+    def test_historical_checkpoint_retains_original_wiring(self):
+        legacy = RMFSR(channels=(8,8,16,16,16), decoder_layout='legacy-v1')
+        checkpoint = dict(config={'channels':[8,8,16,16,16]}, ema=legacy.state_dict())
+        loaded = model_from_checkpoint(checkpoint)
+        loaded.load_state_dict(checkpoint['ema'])
+        self.assertEqual(loaded.decoder_layout, 'legacy-v1')
+        checkpoint['architecture'] = RMFSR().architecture()
+        with self.assertRaisesRegex(ValueError, 'Checkpoint architecture differs'):
+            model_from_checkpoint(checkpoint)
+
+
+class BottleneckAttentionTests(ModelTests):
+    def setUp(self):
+        super().setUp()
+        self.m = RMFSR(channels=(8,8,16,16,16), bottleneck_attention=True).eval()
+        torch.nn.init.normal_(self.m.head.conv.weight, std=.01)
+
+class EfficientDecoderTests(BottleneckAttentionTests):
+    def setUp(self):
+        super().setUp()
+        self.m = RMFSR(channels=(8,8,16,16,16), bottleneck_attention=True,
+                       decoder_before_upsample=True).eval()
+        torch.nn.init.normal_(self.m.head.conv.weight, std=.01)
 
 class LinearModel(torch.nn.Module):
     def forward(self,x,y,t,r):return .2*x+.3*expand(t)+.4*expand(r)

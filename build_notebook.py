@@ -7,7 +7,7 @@ md('''# RMFSR
 
 **Status: GPU pilot complete; full training and paper parity are not complete.**
 
-This notebook runs our independent PyTorch implementation of [Real-time Speech Restoration using Data Prediction Mean Flows](https://arxiv.org/abs/2605.16251). It does not use pretrained RMFSR weights. The current 100-step checkpoint has **not learned meaningful speech-gap filling**.
+This notebook runs our independent PyTorch implementation of [Real-time Speech Restoration using Data Prediction Mean Flows](https://arxiv.org/abs/2605.16251). It does not use pretrained RMFSR weights. The historical `legacy-v1` 100-step checkpoint has **not learned meaningful speech-gap filling**.
 
 The authors' public repository contains demonstration audio, but no model code or weights were available when checked. See `README.md` for the complete paper-to-code audit.
 
@@ -21,6 +21,7 @@ from rmfsr.model import RMFSR
 from rmfsr.flow import meanflow_loss, sample
 from rmfsr.streaming import StreamingRestorer
 run = json.loads((ROOT/'runs/pilot/run.json').read_text())
+audit = json.loads((ROOT/'architecture-audit.json').read_text())
 profile = json.loads((ROOT/'runs/full-shape-profile.json').read_text())
 report = json.loads((ROOT/'runs/pilot/evaluation/report.json').read_text())
 print('PyTorch:', torch.__version__)
@@ -31,13 +32,17 @@ md('''## 1. Network and parity audit
 
 The backbone uses all five reported channel widths, inverted residual blocks, a four-layer temporal bottleneck, frequency attention, and SnakeBeta. Temporal convolutions are causal; frequency downsampling never downsamples audio time.
 
-Our choices for attention, normalization, dilation and block wiring are explicit assumptions. **The parameter and compute counts do not match the paper**, so this is an independent implementation with unverified paper parity.''')
+The corrected default decoder outputs **[256,256,128,64,64]**. The legacy pilot used [256,128,64,64,64] and must not be relabeled as the new model. Our choices for attention, normalization, dilation and block wiring are explicit assumptions. See `ARCHITECTURE.md` for the optional capacity/efficiency study. **The parameter and compute counts do not match the paper**, so this is an independent implementation with unverified paper parity.''')
 code(r'''model = RMFSR()
 parameters = sum(p.numel() for p in model.parameters())
+current = audit['variants']['baseline-after-upsample']
+study = audit['variants']['tcn-attention-before-upsample']
+print('Decoder outputs:', current['decoder_output_channels'])
+print('Optional study:', study['parameters'], 'parameters;', round(study['gmac_per_audio_second_per_evaluation'],3), 'GMAC/s/NFE')
 display(Markdown(f"""| Measure | Our implementation | Paper |
 |---|---:|---:|
 | Parameters | {parameters/1e6:.2f} million | 7.8 million |
-| GMAC/audio-second/NFE | {profile['gmac_per_audio_second_per_evaluation']:.2f} | 1.22 |
+| GMAC/audio-second/NFE | {current['gmac_per_audio_second_per_evaluation']:.2f} | 1.22 |
 | Past context per evaluation | {(model.receptive_frames-1)*.01:.2f} s | 2.13 s |
 | STFT window | 20 ms | 20 ms |
 
@@ -82,7 +87,7 @@ for problem in json.loads((ROOT/'runs/full-preflight.json').read_text())['proble
     print('-', problem)''')
 md('''## 4. Pilot learning curve
 
-One hundred steps validates gradient computation, optimizer updates and checkpointing. It does not establish convergence. Loss varies because degradations are generated afresh for each example. The fixed validation check measures data-prediction error; actual generated-speech evaluation follows below.''')
+The historical legacy-decoder one-hundred-step run validates gradient computation, optimizer updates and checkpointing. It does not establish convergence. Loss varies because degradations are generated afresh for each example. The fixed validation check measures data-prediction error; actual generated-speech evaluation follows below.''')
 code(r'''import matplotlib.pyplot as plt
 rows = [json.loads(line) for line in (ROOT/'runs/pilot/metrics.jsonl').read_text().splitlines()]
 fig, ax = plt.subplots(figsize=(10,3))
@@ -125,10 +130,11 @@ print('Eager MPS NFE=5 real-time factor:', round(case['timing']['rmfsr_nfe5']['r
 print('Real-time factor > 1 means slower than real time.')''')
 md('''## 7. Full-training plan
 
-Resolve/document the architecture discrepancy, prepare full data, choose compute, then train and evaluate. Our proposed AdamW/300k-step schedule is a starting choice, not an author-provided recipe. The local measurement predicts roughly 12 days for network updates alone. Data preparation, augmentation and evaluation add time.
+Resolve/document the architecture discrepancy, prepare full data, choose compute, then train and evaluate. Our proposed AdamW/300k-step schedule is a starting choice, not an author-provided recipe. The historical legacy-decoder batch-4 measurement predicted roughly 12 days for network updates alone. It is not a runtime prediction for the corrected mirrored model or effective batch 16; rebenchmark the selected architecture. Data preparation, augmentation and evaluation add time.
 
 Use `README.md` for data preparation and prerequisites. Keep full-run test speakers p104–p107 separate. Future evaluation should include many speakers, 20/60/80 ms gaps plus 120 ms stress tests, listening, transcript errors, and the paper's SIG2024 benchmarks.''')
-code(r'''print(json.dumps(profile, indent=2))
+code(r'''print('Historical legacy-v1 timing only:')
+print(json.dumps(profile, indent=2))
 # Explicit opt-in: Run All will not launch a multi-day training job.
 RUN_FULL_TRAINING = False
 if RUN_FULL_TRAINING:

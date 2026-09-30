@@ -1,0 +1,229 @@
+{
+  "date": "2026-09-30",
+  "torch_version": "2.8.0",
+  "method": "Forward hooks on CPU, batch one, 161 frequency bins, 400 frames. Conv/Linear/attention MACs; no speed or quality measurements.",
+  "variants": {
+    "baseline-after-upsample": {
+      "architecture": {
+        "decoder_layout": "mirror-v2",
+        "bottleneck_attention": false,
+        "decoder_before_upsample": false,
+        "channels": [
+          64,
+          64,
+          128,
+          256,
+          256
+        ],
+        "encoder_dilations": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "tcn_dilations": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "parameters": 6112710,
+      "decoder_output_channels": [
+        256,
+        256,
+        128,
+        64,
+        64
+      ],
+      "sample_rate": 16000,
+      "hop_ms": 10,
+      "seconds": 4,
+      "frames": 400,
+      "gmac_per_audio_second_per_evaluation": 7.15573568,
+      "gmac_by_stage": {
+        "embedding": 8.192e-06,
+        "stem": 0.004121728,
+        "encoder": 0.805026304,
+        "enc_attention": 0.908029952,
+        "tcn": 0.64282624,
+        "skip": 0.247013376,
+        "decoder": 2.554969088,
+        "dec_attention": 1.991677952,
+        "head": 0.002062848
+      },
+      "cache_elements_per_evaluation": 930432,
+      "fp16_weights_mb": 12.22542,
+      "fp16_cache_mb_per_evaluation": 1.860864,
+      "note": "Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement."
+    },
+    "baseline-before-upsample": {
+      "architecture": {
+        "decoder_layout": "mirror-v2",
+        "bottleneck_attention": false,
+        "decoder_before_upsample": true,
+        "channels": [
+          64,
+          64,
+          128,
+          256,
+          256
+        ],
+        "encoder_dilations": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "tcn_dilations": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "parameters": 6112710,
+      "decoder_output_channels": [
+        256,
+        256,
+        128,
+        64,
+        64
+      ],
+      "sample_rate": 16000,
+      "hop_ms": 10,
+      "seconds": 4,
+      "frames": 400,
+      "gmac_per_audio_second_per_evaluation": 4.83663168,
+      "gmac_by_stage": {
+        "embedding": 8.192e-06,
+        "stem": 0.004121728,
+        "encoder": 0.805026304,
+        "enc_attention": 0.908029952,
+        "tcn": 0.64282624,
+        "skip": 0.247013376,
+        "decoder": 1.319513088,
+        "dec_attention": 0.908029952,
+        "head": 0.002062848
+      },
+      "cache_elements_per_evaluation": 892032,
+      "fp16_weights_mb": 12.22542,
+      "fp16_cache_mb_per_evaluation": 1.784064,
+      "note": "Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement."
+    },
+    "tcn-attention-after-upsample": {
+      "architecture": {
+        "decoder_layout": "mirror-v2",
+        "bottleneck_attention": true,
+        "decoder_before_upsample": false,
+        "channels": [
+          64,
+          64,
+          128,
+          256,
+          256
+        ],
+        "encoder_dilations": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "tcn_dilations": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "parameters": 7431622,
+      "decoder_output_channels": [
+        256,
+        256,
+        128,
+        64,
+        64
+      ],
+      "sample_rate": 16000,
+      "hop_ms": 10,
+      "seconds": 4,
+      "frames": 400,
+      "gmac_per_audio_second_per_evaluation": 7.792319616,
+      "gmac_by_stage": {
+        "embedding": 8.192e-06,
+        "stem": 0.004121728,
+        "encoder": 0.805026304,
+        "enc_attention": 0.908029952,
+        "tcn": 0.64282624,
+        "tcn_attention": 0.636583936,
+        "skip": 0.247013376,
+        "decoder": 2.554969088,
+        "dec_attention": 1.991677952,
+        "head": 0.002062848
+      },
+      "cache_elements_per_evaluation": 930432,
+      "fp16_weights_mb": 14.863244,
+      "fp16_cache_mb_per_evaluation": 1.860864,
+      "note": "Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement."
+    },
+    "tcn-attention-before-upsample": {
+      "architecture": {
+        "decoder_layout": "mirror-v2",
+        "bottleneck_attention": true,
+        "decoder_before_upsample": true,
+        "channels": [
+          64,
+          64,
+          128,
+          256,
+          256
+        ],
+        "encoder_dilations": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "tcn_dilations": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "parameters": 7431622,
+      "decoder_output_channels": [
+        256,
+        256,
+        128,
+        64,
+        64
+      ],
+      "sample_rate": 16000,
+      "hop_ms": 10,
+      "seconds": 4,
+      "frames": 400,
+      "gmac_per_audio_second_per_evaluation": 5.473215616,
+      "gmac_by_stage": {
+        "embedding": 8.192e-06,
+        "stem": 0.004121728,
+        "encoder": 0.805026304,
+        "enc_attention": 0.908029952,
+        "tcn": 0.64282624,
+        "tcn_attention": 0.636583936,
+        "skip": 0.247013376,
+        "decoder": 1.319513088,
+        "dec_attention": 0.908029952,
+        "head": 0.002062848
+      },
+      "cache_elements_per_evaluation": 892032,
+      "fp16_weights_mb": 14.863244,
+      "fp16_cache_mb_per_evaluation": 1.784064,
+      "note": "Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement."
+    }
+  }
+}

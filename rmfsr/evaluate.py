@@ -7,7 +7,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pystoi import stoi
-from .model import RMFSR
+from .model import model_from_checkpoint
 from .spectral import Spectral
 from .flow import sample,pink_noise_like
 from .train import device_for
@@ -35,10 +35,10 @@ def metrics(ref,est,missing,sr):
 def evaluate(checkpoint,baseline_dir,output,device='auto',steps=(1,2,5),chunk_frames=10):
     torch.set_num_threads(8);device=device_for(device);output=pathlib.Path(output);output.mkdir(parents=True,exist_ok=True)
     ckpt=torch.load(checkpoint,map_location='cpu',weights_only=False);cfg=ckpt['config']
-    model=RMFSR(cfg['channels']).to(device).eval();model.load_state_dict(ckpt['ema'])
+    model=model_from_checkpoint(ckpt).to(device).eval();model.load_state_dict(ckpt['ema'])
     spec=Spectral(cfg['sample_rate']);report=dict(checkpoint=str(pathlib.Path(checkpoint).resolve()),
         checkpoint_sha256=hashlib.sha256(pathlib.Path(checkpoint).read_bytes()).hexdigest(),training_steps=ckpt['step'],
-        pilot=cfg['pilot'],quality_claim='Unvalidated experimental checkpoint; not a reproduction of published quality',
+        pilot=cfg['pilot'],architecture=model.architecture(),quality_claim='Unvalidated experimental checkpoint; not a reproduction of published quality',
         device=str(device),chunk_frames=chunk_frames,results=[])
     for case_dir in sorted(pathlib.Path(baseline_dir).glob('opus_*ms')):
         if not case_dir.is_dir():continue

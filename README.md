@@ -6,24 +6,26 @@ This is an **independent, full-width implementation attempt**, not the authors' 
 
 - Implemented the five-level causal U-Net, four-layer TCN, frequency attention, SnakeBeta, data-prediction MeanFlow loss, and separate streaming state for each flow step.
 - Ran 100 training steps on the Mac **MPS GPU**, using one EARS training speaker and a different validation speaker. A third speaker is reserved for pilot testing. This is a plumbing/numerical pilot, not full training.
-- All 51 regression tests pass, covering training math, target EQ, verified datasets, actual restoration validation, causality, codecs, accumulation and checkpoint resume. A full-width, effective-batch-16 MPS numerical smoke completed one update plus 1/2/5-step validation and review audio; this establishes execution, not restoration quality.
+- All 66 regression tests pass, covering training math, target EQ, verified datasets, actual restoration validation, causality, codecs, accumulation and checkpoint resume. A historical full-width (`legacy-v1`), effective-batch-16 MPS numerical smoke completed one update plus 1/2/5-step validation and review audio; this establishes execution, not restoration quality.
 - Evaluated the checkpoint at 1/2/5 flow steps against the existing Opus/tPLCnet comparison inputs. **The pilot does not yet fill speech gaps**; its output is essentially the damaged input. Do not interpret this as evidence against the published method.
+- New runs use decoder outputs **`[256,256,128,64,64]`** (`mirror-v2`). The 100-step pilot used the older shifted decoder; it remains a historical result and cannot resume into the new architecture.
+- Added an optional capacity/efficiency study, with measured counts and a fair comparison plan in [ARCHITECTURE.md](ARCHITECTURE.md).
 - The proposed full run has **not started**. Full dataset preparation is pending, and architecture parity remains unresolved.
 
 ## Paper-to-code audit
 
 | Area | Implementation | Status |
 |---|---|---|
-| Backbone width | `[64,64,128,256,256]`, mirrored decoder; depthwise expansion 2 | Matches stated widths |
+| Backbone width | Encoder `[64,64,128,256,256]`; decoder outputs `[256,256,128,64,64]`; depthwise expansion 2 | Literal stage-output mirror; exact author tensors unavailable |
 | Kernels | Encoder 3×3, decoder 3×2, TCN 1×11 | Matches stated kernels |
 | Flow path | Degraded mean; sigma .3 → 1e-8; compressed complex spectrum, exponent .3 | Matches stated formulation |
 | Training | Model-derived instantaneous JVP tangent; stop-gradient JVP; data-prediction loss | Independent equation implementation, analytically tested |
 | Time sampling | Logit-normal mean .4, SD 1; sigmoid diagonal ratio and cosine span schedule | Schedule endpoints/shapes inferred where unspecified |
-| Architecture size | **5,420,806 parameters**, measured **5.34 GMAC/audio-second/NFE** | Paper reports **7.8M / 1.22 GMAC/s**; substantial mismatch, not validated parity |
+| Architecture size | **6,112,710 parameters**, measured **7.156 GMAC/audio-second/NFE** | Paper reports **7.8M / 1.22 GMAC/s**; substantial mismatch, not validated parity |
 | Context | 218 frames; **2.17 s past context** at 10 ms hop | Paper reports 2.13 s; exact dilations unspecified |
 | Spectrum | 16 kHz, 320-point FFT, sqrt-Hann, 20 ms window, 10 ms hop | Sample rate/hop/window details chosen for existing phone benchmark |
 | Normalization | Divide FFT by window sum, inverse on synthesis | Explicit choice: bounds spectral magnitude for bounded audio; paper's “power normalization” divisor is unspecified |
-| Attention/norm | Four-head, frame-local frequency attention; channel-only normalization | Exact attention/normalization not specified by paper |
+| Attention/norm | Four-head, frame-local frequency attention; channel-only normalization; optional TCN attention study | Exact attention/normalization not specified by paper |
 | Noise | Complex spectral Gaussian with 1/f energy, frequency-average unit variance | DC floor and absolute normalization are explicit choices |
 | Optimizer/training length | AdamW, LR 1e-4, proposed 300k steps, EMA .999 | Our starting configuration; not reported paper hyperparameters |
 | Initialization | Zero-initialized output residual around degraded input | Our stabilization choice; not reported by paper |
@@ -83,7 +85,7 @@ python -m rmfsr.train --config configs/pilot-figure2.json --run runs/my-pilot
 
 The pilot config selects Apple MPS. Set `device` to `cuda` or `cpu` in a copied config for other hosts. Data, checkpoints, generated audio and local results are excluded from Git. The notebook documents the original experiment; its result cells require the locally generated `runs/pilot` artifacts and external Opus/tPLCnet comparison files. A fresh clone does not include those results or pretrained weights. Open it with `jupyter lab rmfsr.ipynb`; use the commands above for a new pilot.
 
-Checkpoint files include weights, EMA, optimizer, training step, data RNG, CPU/MPS/CUDA RNG, configuration, verified audio-content/partition fingerprints, and metric history. Checkpoints from before the verified-content format and corrected targets require a fresh run. Only load trusted local checkpoint files. To extend training, increase `steps` in a copied config; preserve `schedule_steps` for a consistent schedule. Full mode cannot resume a pilot checkpoint as though it were full training.
+Checkpoint files include weights, EMA, optimizer, training step, data RNG, CPU/MPS/CUDA RNG, configuration, verified audio-content/partition fingerprints, and metric history. Checkpoints from before the verified-content format, corrected targets, or mirrored decoder require a fresh training run. Architecture flags are saved and checked before weights load; `evaluate.py` retains the original decoder when reading historical pilot weights. Only load trusted local checkpoint files. To extend training, increase `steps` in a copied config; preserve `schedule_steps` for a consistent schedule. Full mode cannot resume a pilot checkpoint as though it were full training.
 
 ## Full data preparation and training
 
@@ -105,7 +107,7 @@ Full mode requires complete documented speaker splits, DNS noise, DAPS LTAS and 
 
 Raw downloads are large: EARS release assets total ~69 GB, DNS noise archives ~39 GB, and the complete DAPS archive is 16.1 GB. Use sequential conversion and a data volume sized for the converted datasets plus download headroom.
 
-Measured on this Mac: batch 4 × 4-second clips, full-width forward/JVP/backward/update, median **3.54 s/step** over three timed steps. For the original batch-4 configuration without gradient accumulation, extrapolation to 300k steps is **~12.3 days**, before augmentation, validation, I/O and thermal variability. This is a rough planning estimate, not the paper's training requirement. No paid cloud resources have been provisioned.
+Historical `legacy-v1` measurement on this Mac: batch 4 × 4-second clips, full-width forward/JVP/backward/update, median **3.54 s/step** over three timed steps. For the original batch-4 configuration without gradient accumulation, extrapolation to 300k steps is **~12.3 days**, before augmentation, validation, I/O and thermal variability. This is a historical planning estimate, not timing for the corrected decoder or the paper's training requirement. Rebenchmark the chosen architecture before estimating GPU time. No paid cloud resources have been provisioned.
 
 ## Streaming and evaluation
 

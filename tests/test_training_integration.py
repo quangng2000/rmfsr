@@ -43,6 +43,7 @@ class TrainingIntegrationTests(unittest.TestCase):
             self.assertEqual(preflight.call_count, 1)
             checkpoint = torch.load(root/'run/best-validation.pt', weights_only=False)
             self.assertEqual(checkpoint['step'], 2)
+            self.assertEqual(checkpoint['architecture']['decoder_layout'], 'mirror-v2')
             self.assertEqual(checkpoint['best_validation'], .2)
             self.assertEqual(checkpoint['validation_selection_metric'], 'validation_restoration_mse_nfe1')
             self.assertEqual(checkpoint['input_fingerprints']['integrity_version'], 'verified-content-v1')
@@ -57,6 +58,18 @@ class TrainingIntegrationTests(unittest.TestCase):
             checkpoint['input_fingerprints'].pop('integrity_version')
             torch.save(checkpoint,path)
             with self.assertRaisesRegex(ValueError, 'predates verified-content'):
+                train({**cfg, 'steps':3}, root/'run', path)
+
+    def test_old_decoder_checkpoint_cannot_resume_new_training(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); cfg = fixture(root)
+            with patch('rmfsr.train.validate', return_value={'validation_restoration_mse_nfe1':.2}), contextlib.redirect_stdout(io.StringIO()):
+                train(cfg, root/'run')
+            path = root/'run/latest.pt'
+            checkpoint = torch.load(path, weights_only=False)
+            checkpoint.pop('architecture')
+            torch.save(checkpoint, path)
+            with self.assertRaisesRegex(ValueError, 'decoder architecture; start a new run'):
                 train({**cfg, 'steps':3}, root/'run', path)
 
     def test_benchmark_progress_cannot_override_normal_training(self):

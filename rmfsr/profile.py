@@ -4,8 +4,8 @@ from .model import RMFSR,FrequencyAttention
 from .flow import meanflow_loss
 from .train import device_for
 
-def profile(device='auto',batch=1,seconds=4,repeat=5):
-    torch.set_num_threads(8);device=device_for(device);model=RMFSR().to(device)
+def profile(device='auto',batch=1,seconds=4,repeat=5,bottleneck_attention=False,decoder_before_upsample=False):
+    torch.set_num_threads(8);device=device_for(device);model=RMFSR(bottleneck_attention=bottleneck_attention,decoder_before_upsample=decoder_before_upsample).to(device)
     x=torch.randn(batch,2,161,round(seconds*100),device=device)*.05;y=x+.02*torch.randn_like(x)
     optimizer=torch.optim.AdamW(model.parameters(),lr=1e-4);durations=[]
     if device.type=='cuda':torch.cuda.reset_peak_memory_stats()
@@ -17,17 +17,7 @@ def profile(device='auto',batch=1,seconds=4,repeat=5):
         if device.type=='mps':torch.mps.synchronize()
         elif device.type=='cuda':torch.cuda.synchronize()
         if i:durations.append(time.perf_counter()-start)
-    macs=[0];hooks=[]
-    def conv_hook(m,args,out):macs[0]+=out.numel()*(m.in_channels//m.groups)*m.kernel_size[0]*m.kernel_size[1]
-    def linear_hook(m,args,out):macs[0]+=out.numel()*m.in_features
-    def attn_hook(m,args,out):
-        b,c,f,n=out.shape;macs[0]+=2*b*n*f*f*c
-    for m in model.modules():
-        if isinstance(m,torch.nn.Conv2d):hooks.append(m.register_forward_hook(conv_hook))
-        elif isinstance(m,torch.nn.Linear):hooks.append(m.register_forward_hook(linear_hook))
-        elif isinstance(m,FrequencyAttention):hooks.append(m.register_forward_hook(attn_hook))
-    with torch.no_grad():model(x[:1],y[:1],x.new_tensor([.5]),x.new_tensor([.3]))
-    for hook in hooks:hook.remove()
+    inventory = model_inventory(model, seconds=seconds)
     return dict(device=str(device),gpu=torch.cuda.get_device_name() if device.type=='cuda' else None,
                 torch_version=torch.__version__,precision='float32',
                 peak_allocated_gib=torch.cuda.max_memory_allocated()/1024**3 if device.type=='cuda' else None,
@@ -35,12 +25,68 @@ def profile(device='auto',batch=1,seconds=4,repeat=5):
                 batch=batch,seconds=seconds,parameters=sum(p.numel() for p in model.parameters()),
                 training_step_seconds=durations,median_seconds=statistics.median(durations),
                 estimated_300k_step_days=statistics.median(durations)*300000/86400,
-                gmac_per_audio_second_per_evaluation=macs[0]/seconds/1e9,
+                gmac_per_audio_second_per_evaluation=inventory['gmac_per_audio_second_per_evaluation'],
+                architecture=model.architecture(),
                 mac_note='Conv, Linear, attention matmuls; excludes elementwise ops, STFT, and augmentation')
+
+
+def model_inventory(model, seconds=4):
+    """Forward-only tensor/MAC inventory; does not estimate runtime."""
+    device = next(model.parameters()).device
+    frames = round(seconds * 100)
+    if frames < 1:
+        raise ValueError('seconds must cover at least one 10 ms frame')
+    x = torch.zeros(1, 2, 161, frames, device=device)
+    y = torch.zeros_like(x)
+    cache = {}
+    macs={};hooks=[]
+    def add(stage, value):
+        macs[stage] = macs.get(stage, 0) + value
+    def hook_for(stage, kind):
+        def count(module, args, out):
+            if kind == 'conv':
+                value = out.numel()*(module.in_channels//module.groups)*module.kernel_size[0]*module.kernel_size[1]
+            elif kind == 'linear':
+                value = out.numel()*module.in_features
+            else:
+                b,c,f,n = out.shape
+                value = 2*b*n*f*f*c
+            add(stage, value)
+        return count
+    for name, module in model.named_modules():
+        stage = name.split('.')[0]
+        if isinstance(module, torch.nn.Conv2d):
+            hooks.append(module.register_forward_hook(hook_for(stage, 'conv')))
+        elif isinstance(module, torch.nn.Linear):
+            hooks.append(module.register_forward_hook(hook_for(stage, 'linear')))
+        elif isinstance(module, FrequencyAttention):
+            hooks.append(module.register_forward_hook(hook_for(stage, 'attention')))
+    try:
+        with torch.no_grad():
+            model(x,y,x.new_tensor([.5]),x.new_tensor([.3]),cache)
+    finally:
+        for hook in hooks:
+            hook.remove()
+    parameters = sum(p.numel() for p in model.parameters())
+    cache_elements = sum(state.numel() for state in cache.values())
+    return dict(architecture=model.architecture(), parameters=parameters,
+                decoder_output_channels=[block.project.conv.out_channels for block in model.decoder],
+                sample_rate=16000, hop_ms=10, seconds=seconds, frames=frames,
+                gmac_per_audio_second_per_evaluation=sum(macs.values())/seconds/1e9,
+                gmac_by_stage={stage: count/seconds/1e9 for stage, count in macs.items()},
+                cache_elements_per_evaluation=cache_elements,
+                fp16_weights_mb=parameters*2/1e6,
+                fp16_cache_mb_per_evaluation=cache_elements*2/1e6,
+                note='Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement.')
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--device',default='auto');p.add_argument('--batch',type=int,default=1)
-    p.add_argument('--seconds',type=float,default=4);p.add_argument('--repeat',type=int,default=5);p.add_argument('--output',required=True)
-    a=p.parse_args();r=profile(a.device,a.batch,a.seconds,a.repeat)
+    p.add_argument('--decoder-before-upsample',action='store_true');p.add_argument('--bottleneck-attention',action='store_true');p.add_argument('--inventory-only',action='store_true');p.add_argument('--seconds',type=float,default=4);p.add_argument('--repeat',type=int,default=5);p.add_argument('--output',required=True)
+    a=p.parse_args()
+    if a.inventory_only:
+        torch.set_num_threads(8)
+        r=model_inventory(RMFSR(bottleneck_attention=a.bottleneck_attention,decoder_before_upsample=a.decoder_before_upsample).to(device_for(a.device)),a.seconds)
+    else:
+        r=profile(a.device,a.batch,a.seconds,a.repeat,a.bottleneck_attention,a.decoder_before_upsample)
     from pathlib import Path
     Path(a.output).write_text(json.dumps(r,indent=2));print(json.dumps(r,indent=2))

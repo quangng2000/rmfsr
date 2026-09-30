@@ -94,9 +94,16 @@ class TimeEmbedding(nn.Module):
         return self.net(torch.cat((phases.sin(), phases.cos()), -1).flatten(1))
 
 class RMFSR(nn.Module):
-    def __init__(self, channels=(64,64,128,256,256), encoder_dilations=(1,2,4,8,16), tcn_dilations=(1,2,4,8)):
+    def __init__(self, channels=(64,64,128,256,256), encoder_dilations=(1,2,4,8,16), tcn_dilations=(1,2,4,8), decoder_layout='mirror-v2', bottleneck_attention=False, decoder_before_upsample=False):
         super().__init__()
+        if decoder_layout not in ('mirror-v2', 'legacy-v1'):
+            raise ValueError('Unknown decoder layout')
         self.channels = tuple(channels)
+        self.encoder_dilations = tuple(encoder_dilations)
+        self.tcn_dilations = tuple(tcn_dilations)
+        self.decoder_layout = decoder_layout
+        self.bottleneck_attention = bool(bottleneck_attention)
+        self.decoder_before_upsample = bool(decoder_before_upsample)
         self.embedding = TimeEmbedding()
         self.stem = ConditionedConv(4, channels[0])
         self.encoder = nn.ModuleList()
@@ -107,11 +114,16 @@ class RMFSR(nn.Module):
             self.enc_attention.append(FrequencyAttention(cout))
             cin = cout
         self.tcn = nn.ModuleList([InvertedResidual(cin, cin, (1,11), d) for d in tcn_dilations])
+        # Optional capacity study, not a claim about the authors' attention placement.
+        self.tcn_attention = nn.ModuleList([FrequencyAttention(cin) for _ in tcn_dilations]
+                                           if bottleneck_attention else [])
         self.skip = nn.ModuleList()
         self.decoder = nn.ModuleList()
         self.dec_attention = nn.ModuleList()
         for i in reversed(range(len(channels))):
-            cout = channels[max(i-1, 0)]
+            # Paper decoder stage outputs mirror the encoder widths. The legacy
+            # layout is retained only to evaluate the original pilot checkpoints.
+            cout = channels[i] if decoder_layout == 'mirror-v2' else channels[max(i-1, 0)]
             self.skip.append(ConditionedConv(channels[i], cin))
             self.decoder.append(InvertedResidual(cin, cout, (3,2)))
             self.dec_attention.append(FrequencyAttention(cout))
@@ -121,6 +133,13 @@ class RMFSR(nn.Module):
         nn.init.zeros_(self.head.conv.weight)
         nn.init.zeros_(self.head.conv.bias)
         self.receptive_frames = 1 + 2*sum(encoder_dilations) + 10*sum(tcn_dilations) + len(channels)
+    def architecture(self):
+        return dict(decoder_layout=self.decoder_layout, bottleneck_attention=self.bottleneck_attention,
+                    decoder_before_upsample=self.decoder_before_upsample,
+                    channels=list(self.channels),
+                    encoder_dilations=list(self.encoder_dilations),
+                    tcn_dilations=list(self.tcn_dilations))
+
     def forward(self, x, y, t, r, cache=None):
         emb = self.embedding(t, r)
         h = self.stem(torch.cat((x,y), 1), emb, cache)
@@ -129,10 +148,30 @@ class RMFSR(nn.Module):
             sizes.append(h.shape[2])
             h = attention(block(h, emb, cache), emb, cache)
             skips.append(h)
-        for block in self.tcn:
+        for i, block in enumerate(self.tcn):
             h = block(h, emb, cache)
+            if self.bottleneck_attention:
+                h = self.tcn_attention[i](h, emb, cache)
         for mapping, block, attention, skip, size in zip(self.skip, self.decoder, self.dec_attention, reversed(skips), reversed(sizes)):
             h = h + mapping(skip, emb, cache)
-            h = F.interpolate(h, size=(size,h.shape[-1]), mode='nearest')
-            h = attention(block(h, emb, cache), emb, cache)
+            if self.decoder_before_upsample:
+                h = attention(block(h, emb, cache), emb, cache)
+                h = F.interpolate(h, size=(size,h.shape[-1]), mode='nearest')
+            else:
+                h = F.interpolate(h, size=(size,h.shape[-1]), mode='nearest')
+                h = attention(block(h, emb, cache), emb, cache)
         return y + self.head(h, emb, cache)
+
+
+def model_from_checkpoint(checkpoint):
+    """Read trusted historical weights with their original decoder wiring."""
+    architecture = checkpoint.get('architecture')
+    layout = architecture['decoder_layout'] if architecture is not None else 'legacy-v1'
+    model = RMFSR(channels=checkpoint['config']['channels'], decoder_layout=layout,
+                  encoder_dilations=architecture.get('encoder_dilations', (1,2,4,8,16)) if architecture else (1,2,4,8,16),
+                  tcn_dilations=architecture.get('tcn_dilations', (1,2,4,8)) if architecture else (1,2,4,8),
+                  bottleneck_attention=architecture.get('bottleneck_attention', False) if architecture else False,
+                  decoder_before_upsample=architecture.get('decoder_before_upsample', False) if architecture else False)
+    if architecture is not None and architecture != model.architecture():
+        raise ValueError('Checkpoint architecture differs from the supported model')
+    return model

@@ -1,6 +1,6 @@
 # RMFSR training preparation
 
-This is an independent implementation of [RMFSR](https://arxiv.org/abs/2605.16251), not the authors' code or a pretrained RMFSR checkpoint. The existing 100-step pilot does not improve the packet-loss examples. The architecture audit still reports 5.42M parameters and 5.34 GMAC/audio-second, compared with the paper's 7.8M and 1.22. Resolve that mismatch before describing any long run as a match to the published results. The crop, batch, optimizer, 300,000-step budget, split, and unreported augmentation settings are our experiment choices.
+This is an independent implementation of [RMFSR](https://arxiv.org/abs/2605.16251), not the authors' code or a pretrained RMFSR checkpoint. The existing 100-step pilot does not improve the packet-loss examples. The corrected mirrored decoder has 6.113M parameters and 7.156 GMAC/audio-second, compared with the paper's 7.8M and 1.22. The optional combined architecture study has 7.432M parameters and 5.473 GMAC/audio-second; neither matches the paper. See [ARCHITECTURE.md](ARCHITECTURE.md) for the hypotheses, measured 2×2 comparison and selection plan. The crop, batch, optimizer, 300,000-step budget, split, and unreported augmentation settings are our experiment choices.
 
 ## Author training duration: unresolved
 
@@ -23,7 +23,7 @@ Primary evidence: [paper, Figure 1 and section 2.4](https://arxiv.org/html/2605.
 | Digital processing | MP3 and GSM encode/decode, suppression, spectral masks, phase/allpass, amplitude modulation, optional quantization, and 10–80 ms dropouts. |
 | Noise source | DNS5 official noise archives; acquisition implemented and URLs checked. No additional classifier is used to screen residual speech in these archives. |
 
-The previous pilot used the `legacy` profile, synthetic noise, and no DAPS EQ. The new full/cloud configurations use `figure2-v2`. Recorded old pilot outputs remain available locally. The corrected target processing and verified-content checkpoint format require a fresh run; checkpoints from before these fixes are rejected on resume. These settings cover the diagram's functional blocks but cannot recreate unpublished author settings exactly.
+The previous pilot used the `legacy` profile, synthetic noise, and no DAPS EQ. The new full/cloud configurations use `figure2-v2`. Recorded old pilot outputs remain available locally. The corrected target processing and verified-content checkpoint format require a fresh run; checkpoints from before these fixes are rejected on resume. The mirrored decoder is a separate architecture change; old weights may be evaluated with their original wiring but cannot resume new training. These settings cover the diagram's functional blocks but cannot recreate unpublished author settings exactly.
 
 ## Data and storage
 
@@ -81,7 +81,7 @@ The benchmark first measures a full-width, 4-second, batch-4, off-diagonal JVP u
 - Keep permanent quality-review checkpoints at 10k, 50k, 100k, 200k and 300k. At these updates the trainer also writes held-out restoration metrics and up to two audio comparisons under `runs/estimate/validation/step-NNNNNNNN/`. Every 1,000 updates, validation restores the same 32 examples from damaged audio plus fixed independent noise at 1/2/5 network evaluations. It reports waveform MSE, gap MSE, intact-region MSE, and STOI when enough nonsilent audio exists. `best-validation.pt` is selected by `validation_restoration_mse_nfe5`; the teacher-input diagonal MSE remains a separate diagnostic. Listening, transcript accuracy and hallucination assessment still require review.
 - Consider an extension to 500k only if held-out quality is still improving. Keep the original 300k schedule and use its final learning rate for an extension, or design an explicitly separate continuation; resume rejects silent schedule changes.
 
-Why this is reasonable: more independent corruptions improve the stochastic estimate of the expected training loss; accumulation reduces gradient sampling variance without requiring the entire effective batch in memory. It does not establish a power law from updates to MOS, eliminate model/augmentation approximation error, or guarantee published quality. Parameter count alone cannot determine the necessary number of updates. The architecture remains our measured 5.42M-parameter version.
+Why this is reasonable: more independent corruptions improve the stochastic estimate of the expected training loss; accumulation reduces gradient sampling variance without requiring the entire effective batch in memory. It does not establish a power law from updates to MOS, eliminate model/augmentation approximation error, or guarantee published quality. Parameter count alone cannot determine the necessary number of updates. The default is the measured 6.113M-parameter mirrored version; `configs/architecture-study.json` opts into the 7.432M capacity/efficiency variant. Both keep the requested decoder widths and need fresh runs.
 
 Runtime must be measured for the complete accumulated update. Total compute hours = updates × measured seconds/update / 3600; at 300k updates, 1 second/update means 83.3 hours and 2 seconds/update means 166.7 hours. These are conditional arithmetic examples, not H100/Ada speed predictions. Include data preparation, validation and checkpoint overhead separately.
 
@@ -96,15 +96,15 @@ The benchmark's synthetic compute-only stage uses one microbatch; use its **real
 
 ## Recent-iPhone inference estimate
 
-A recent iPhone is a plausible deployment target after native conversion. This is an engineering estimate; the model has not been exported to Core ML or timed on an iPhone. The Python/MPS pilot took around twice audio duration at five evaluations on several comparison clips, so the current Python implementation does not demonstrate real-time operation.
+A recent iPhone is a plausible deployment target after native conversion. This is an engineering estimate; the model has not been exported to Core ML or timed on an iPhone. The historical `legacy-v1` Python/MPS pilot took around twice audio duration at five evaluations on several comparison clips, so the current Python implementation does not demonstrate real-time operation.
 
-Measured tensor inventory (16 kHz, batch one) gives 5,420,806 parameters and 909,568 persistent convolution-cache elements **per network evaluation index**. With FP16 storage: weights are 10.84 MB; one cache set is 1.82 MB; five sets are 9.10 MB. Around 19.94 MB covers shared weights plus those five state sets only; temporary activations, STFT/ISTFT, compiled model overhead and the host app need additional memory. Weight storage is not multiplied by the number of evaluation steps, provided the deployment shares weights.
+Measured tensor inventory (16 kHz, batch one) gives 6,112,710 parameters and 930,432 persistent convolution-cache elements **per network evaluation index**. With FP16 storage: weights are 12.23 MB; one cache set is 1.86 MB; five sets are 9.30 MB. Around 21.53 MB covers shared weights plus those five state sets only; temporary activations, STFT/ISTFT, compiled model overhead and the host app need additional memory. Weight storage is not multiplied by the number of evaluation steps, provided the deployment shares weights.
 
 | Network evaluations per audio chunk | Paper network, GMAC/audio-second | Our measured network, GMAC/audio-second |
 |---|---:|---:|
-| 1 | 1.22 | 5.34 |
-| 2 | 2.44 | 10.68 |
-| 5 | 6.10 | 26.69 |
+| 1 | 1.22 | 7.16 |
+| 2 | 2.44 | 14.31 |
+| 5 | 6.10 | 35.78 |
 
 Paper costs are from [Table 1](https://arxiv.org/html/2605.16251v1#S3.T1), scaled linearly by the evaluation count. Our figures count convolutions, linear layers and attention matrix products; exclude activation functions such as sine, normalization, memory traffic and audio transforms. Peak chip TOPS cannot be converted directly into achieved latency for this graph.
 
@@ -145,3 +145,11 @@ Full training is intentionally blocked until the complete EARS/DNS/DAPS inputs e
 - Dataset fingerprints verify actual bytes and selected partitions. Verification happens once per process and does not repeatedly read all audio during checkpoint saves. Keep prepared datasets immutable during a process; a restart/resume verifies them again.
 
 The update target stays at **300,000**, effective batch **16**, with the same AdamW/EMA and approximate schedule. The fixes do not establish author architecture parity or demonstrate learned restoration quality.
+
+## Framework and optimization plan
+
+Keep PyTorch 2.8 as the tested correctness baseline. On the selected CUDA GPU, first measure the complete accumulated update and isolate network forward, off-diagonal JVP, backward, data augmentation and validation time. Then benchmark `torch.compile`/Inductor at identical shapes and precision. Compilation overhead belongs in setup time; compare steady-state throughput, memory, outputs, loss and all parameter gradients against eager execution. Compilation and GPU-kernel fusion can improve utilization, but do not change this graph's mathematical MAC count.
+
+[JAX `jit`](https://docs.jax.dev/en/latest/_autosummary/jax.jit.html) plus [`jvp`](https://docs.jax.dev/en/latest/_autosummary/jax.jvp.html) is a credible alternative for the MeanFlow derivatives. A port would require matching convolutions, padding, SnakeBeta, normalization, Fourier embeddings, random samples, stopped JVP targets, gradients and streaming state. Do not assume a speed gain or rewrite the data pipeline before a measured comparison.
+
+[Triton](https://triton-lang.org/main/index.html) is a GPU-kernel language/compiler, rather than a replacement training framework. PyTorch supports [custom Triton kernels under `torch.compile`](https://docs.pytorch.org/tutorials/recipes/torch_compile_user_defined_triton_kernel_tutorial.html). If profiling identifies memory-bound elementwise work, investigate fusing channel normalization, conditioning or SnakeBeta. Custom training kernels must retain tested forward-mode JVP and backward behavior; a fast inference-only kernel is insufficient for this loss. No CUDA compile, custom-kernel or JAX speedup has been measured yet.
