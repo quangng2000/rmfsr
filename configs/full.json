@@ -1,0 +1,33 @@
+{
+  "name": "rmfsr-fullwidth-reproduction",
+  "pilot": false,
+  "sample_rate": 16000,
+  "seconds": 4.0,
+  "batch_size": 4,
+  "channels": [
+    64,
+    64,
+    128,
+    256,
+    256
+  ],
+  "steps": 300000,
+  "learning_rate": 0.0001,
+  "warmup_steps": 2000,
+  "ema_decay": 0.999,
+  "gradient_clip": 1.0,
+  "seed": 42,
+  "save_every": 1000,
+  "validate_every": 1000,
+  "train_manifest": "data/train.json",
+  "validation_manifest": "data/validation.json",
+  "noise_dir": "data/dns_noise/train",
+  "ltas_path": "data/daps_ltas.npy",
+  "ffmpeg": null,
+  "device": "auto",
+  "threads": 8,
+  "test_manifest": "data/test.json",
+  "validation_noise_dir": "data/dns_noise/validation",
+  "noise_completion": "data/dns_noise/complete.json",
+  "augmentation_profile": "figure2-v2"
+}
