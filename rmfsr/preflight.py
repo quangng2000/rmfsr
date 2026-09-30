@@ -6,61 +6,94 @@ import subprocess
 from .train import get_ffmpeg
 from .gsm import library_path
 from .data import assert_disjoint
-from .paths import load_manifest, manifest_fingerprint
+from .paths import (FileVerifier, INTEGRITY_VERSION, verify_manifest,
+                    noise_partition_fingerprints, ltas_fingerprint, _hash_json)
 
 
 def check(config):
     cfg = dict(config) if isinstance(config, dict) else json.loads(Path(config).read_text())
     problems, info = [], {}
+    pilot = cfg.get('pilot', False)
+    verifier = FileVerifier()
+    fingerprints = {'integrity_version': INTEGRITY_VERSION}
     expected = {'train_manifest': {f'p{i:03d}' for i in range(1, 100)},
                 'validation_manifest': {f'p{i:03d}' for i in range(100, 104)}}
-    if not cfg['pilot']:
+    if not pilot:
         expected['test_manifest'] = {f'p{i:03d}' for i in range(104, 108)}
-    existing = []
+    existing, speech_content = [], []
     for key, exact_speakers in expected.items():
-        path = Path(cfg.get(key, '__missing__'))
-        if not path.exists():
+        path = Path(cfg.get(key) or '__missing__')
+        if not path.is_file():
             problems.append(f'Missing {key}: {path}')
             continue
-        rows = load_manifest(path)
-        speakers = {r['speaker'] for r in rows}
-        info[key] = dict(speakers=len(speakers), files=len(rows),
-                         hours=sum(r['seconds'] for r in rows) / 3600,
-                         fingerprint=manifest_fingerprint(path))
-        if not cfg['pilot'] and speakers != exact_speakers:
-            problems.append(f'{key}: expected exact documented speaker split')
-        if any(not Path(r['path']).is_file() for r in rows):
-            problems.append(f'{key}: missing audio files')
-        if any(r['sr'] != cfg['sample_rate'] for r in rows):
-            problems.append(f'{key}: sample rate mismatch')
-        existing.append(path)
+        try:
+            verified = verify_manifest(path, require_hashes=not pilot,
+                                       sample_rate=cfg['sample_rate'], verifier=verifier)
+            speakers = {row['speaker'] for row in verified['rows']}
+            info[key] = {field: verified[field] for field in
+                         ('speakers', 'files', 'hours', 'fingerprint', 'computed_legacy_hashes')}
+            fingerprints[key] = verified['fingerprint']
+            if not pilot and speakers != exact_speakers:
+                problems.append(f'{key}: expected exact documented speaker split')
+            if not pilot and any(set(verified['content_hashes']) & other for other in speech_content):
+                problems.append('Speech content leakage across data splits')
+            speech_content.append(set(verified['content_hashes']))
+            existing.append(path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            problems.append(f'{key}: {exc}')
     try:
         assert_disjoint(*existing)
     except ValueError as exc:
         problems.append(str(exc))
-    if not cfg['pilot']:
-        for key in ('noise_dir', 'validation_noise_dir'):
-            noise = Path(cfg.get(key, '__missing__'))
-            if not noise.is_dir() or not any(p.suffix.lower() in ('.wav', '.flac') for p in noise.rglob('*')):
-                problems.append(f'DNS noise not prepared: {key}')
-        completion = Path(cfg.get('noise_completion', '__missing__'))
+
+    provenance_rows = None
+    if not pilot:
+        completion = Path(cfg.get('noise_completion') or '__missing__')
         if not completion.is_file():
             problems.append('Complete DNS corpus provenance missing')
         else:
             from .corpus import SHARDS
-            from .download import digest
-            inventory = json.loads(completion.read_text())
-            if inventory.get('shards') != SHARDS:
-                problems.append('DNS archive inventory differs from the configured corpus')
-            for shard in SHARDS:
-                index = completion.parent / (shard + '.json')
-                if not index.is_file() or digest(index) != inventory.get('manifest_sha256', {}).get(shard):
-                    problems.append(f'DNS shard manifest missing or changed: {shard}')
-                elif any(not Path(row['path']).is_file() for row in load_manifest(index)):
-                    problems.append(f'DNS shard audio missing: {shard}')
-        ltas = Path(cfg['ltas_path'])
-        if not ltas.exists() or not Path(str(ltas) + '.json').exists():
-            problems.append('DAPS produced-speech LTAS and provenance not prepared')
+            try:
+                inventory = json.loads(completion.read_text())
+                if not isinstance(inventory, dict) or not isinstance(inventory.get('manifest_sha256'), dict):
+                    raise ValueError('DNS inventory must include a manifest_sha256 mapping')
+                if inventory.get('shards') != SHARDS:
+                    problems.append('DNS archive inventory differs from the configured corpus')
+                if inventory.get('sample_rate') != cfg['sample_rate']:
+                    problems.append('DNS archive inventory sample rate mismatch')
+                shard_fingerprints, provenance_rows = {}, []
+                for shard in SHARDS:
+                    index = completion.parent / (shard + '.json')
+                    try:
+                        if verifier.digest(index) != inventory.get('manifest_sha256', {}).get(shard):
+                            raise ValueError('manifest SHA-256 mismatch')
+                        verified = verify_manifest(index, require_hashes=True,
+                                                   sample_rate=cfg['sample_rate'], verifier=verifier)
+                        shard_fingerprints[shard] = verified['fingerprint']
+                        provenance_rows.extend(verified['rows'])
+                    except (OSError, ValueError, KeyError, TypeError) as exc:
+                        problems.append(f'DNS shard manifest/audio invalid: {shard}: {exc}')
+                fingerprints['noise_inventory'] = _hash_json({
+                    'completion_sha256': verifier.digest(completion), 'shards': shard_fingerprints})
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                problems.append(f'DNS corpus provenance invalid: {exc}')
+
+    if cfg.get('noise_dir') or not pilot:
+        try:
+            fingerprints.update(noise_partition_fingerprints(
+                cfg.get('noise_dir', '__missing__'),
+                cfg.get('validation_noise_dir') or cfg.get('noise_dir', '__missing__'),
+                sample_rate=cfg['sample_rate'], verifier=verifier,
+                provenance_rows=provenance_rows, require_hashes=not pilot))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            problems.append(str(exc))
+    if cfg.get('ltas_path') or not pilot:
+        try:
+            fingerprints['ltas'] = ltas_fingerprint(
+                cfg.get('ltas_path', '__missing__'), sample_rate=cfg['sample_rate'],
+                verifier=verifier, require_provenance=not pilot)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            problems.append(str(exc))
     try:
         info['gsm_library'] = library_path()
     except RuntimeError as exc:
@@ -76,7 +109,8 @@ def check(config):
                 problems.append('ffmpeg lacks MP3 encoder')
         except (OSError, subprocess.CalledProcessError) as exc:
             problems.append(f'ffmpeg unusable: {exc}')
-    info.update(problems=problems, ready=not problems, pilot=cfg['pilot'],
+    info.update(problems=problems, ready=not problems, pilot=pilot,
+                input_fingerprints=fingerprints,
                 free_disk_gib=shutil.disk_usage('.').free / 1024**3)
     return info
 

@@ -37,5 +37,13 @@
   "milestone_every": 10000,
   "keep_milestones": 3,
   "max_wall_seconds": 21600,
-  "augmentation_profile": "figure2-v2"
+  "augmentation_profile": "figure2-v2",
+  "inference_evaluations_to_compare": [
+    1,
+    2,
+    5
+  ],
+  "validation_selection_metric": "validation_restoration_mse_nfe5",
+  "validation_chunk_frames": 10,
+  "validation_audio_examples": 2
 }

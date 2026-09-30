@@ -38,5 +38,15 @@
   "keep_milestones": 3,
   "max_wall_seconds": 1800,
   "schedule_steps": 300000,
-  "augmentation_profile": "figure2-v2"
+  "augmentation_profile": "figure2-v2",
+  "inference_evaluations_to_compare": [
+    1,
+    2,
+    5
+  ],
+  "validation_selection_metric": "validation_restoration_mse_nfe5",
+  "validation_chunk_frames": 10,
+  "validation_audio_examples": 2,
+  "benchmark_only": true,
+  "benchmark_flow_progress": 0.9
 }

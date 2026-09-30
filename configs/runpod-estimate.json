@@ -52,5 +52,8 @@
     1,
     2,
     5
-  ]
+  ],
+  "validation_selection_metric": "validation_restoration_mse_nfe5",
+  "validation_chunk_frames": 10,
+  "validation_audio_examples": 2
 }

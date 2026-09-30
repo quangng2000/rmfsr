@@ -37,15 +37,21 @@ def meanflow_loss(model, clean, degraded, progress=0, sigma_max=.3, sigma_min=1e
     if noise is None: noise = pink_noise_like(clean)
     tt,rr = expand(t),expand(r)
     xt = (1-tt)*clean + tt*degraded + ((1-tt)*sigma_min + tt*sigma_max)*noise
-    conditional_velocity = degraded-clean + (sigma_max-sigma_min)*noise
     with torch.no_grad():
-        instantaneous = (xt-model(xt,degraded,t,t))/tt
-        def velocity(z, end, start):
-            return (z-model(z,degraded,start,end))/expand(start)
-        _, jvp = torch.func.jvp(velocity, (xt,r,t),
-                               (instantaneous,torch.zeros_like(r),torch.ones_like(t)))
-        # t*(V-v_c) == target_data - predicted_data; JVP must be stop-gradient.
-        target = xt - tt*conditional_velocity + tt*(tt-rr)*jvp
+        if torch.equal(t,r) and bool(torch.isfinite(t).all()):
+            # r=t makes the JVP coefficient zero. Algebraically xt-t*v_cond
+            # is clean + sigma_min*noise; use this form to avoid subtracting
+            # large degraded/noise terms and preserve the nonzero noise floor.
+            target = clean + sigma_min*noise
+        else:
+            conditional_velocity = degraded-clean + (sigma_max-sigma_min)*noise
+            instantaneous = (xt-model(xt,degraded,t,t))/tt
+            def velocity(z, end, start):
+                return (z-model(z,degraded,start,end))/expand(start)
+            _, jvp = torch.func.jvp(velocity, (xt,r,t),
+                                   (instantaneous,torch.zeros_like(r),torch.ones_like(t)))
+            # t*(V-v_c) == target_data - predicted_data; JVP must be stop-gradient.
+            target = xt - tt*conditional_velocity + tt*(tt-rr)*jvp
     prediction = model(xt,degraded,t,r)
     loss = (prediction-target.detach()).square().mean()
     return loss, {'dp_mse':(prediction.detach()-clean).square().mean().item(),

@@ -6,9 +6,9 @@ This is an **independent, full-width implementation attempt**, not the authors' 
 
 - Implemented the five-level causal U-Net, four-layer TCN, frequency attention, SnakeBeta, data-prediction MeanFlow loss, and separate streaming state for each flow step.
 - Ran 100 training steps on the Mac **MPS GPU**, using one EARS training speaker and a different validation speaker. A third speaker is reserved for pilot testing. This is a plumbing/numerical pilot, not full training.
-- Mathematical, causality, codec, STFT, and end-to-end streaming tests pass. Checkpoint resume reproduced the next update exactly in the recorded check.
+- All 51 regression tests pass, covering training math, target EQ, verified datasets, actual restoration validation, causality, codecs, accumulation and checkpoint resume. A full-width, effective-batch-16 MPS numerical smoke completed one update plus 1/2/5-step validation and review audio; this establishes execution, not restoration quality.
 - Evaluated the checkpoint at 1/2/5 flow steps against the existing Opus/tPLCnet comparison inputs. **The pilot does not yet fill speech gaps**; its output is essentially the damaged input. Do not interpret this as evidence against the published method.
-- The proposed full run has **not started**. The full data recipe is not ready, and architecture parity remains unresolved.
+- The proposed full run has **not started**. Full dataset preparation is pending, and architecture parity remains unresolved.
 
 ## Paper-to-code audit
 
@@ -83,7 +83,7 @@ python -m rmfsr.train --config configs/pilot-figure2.json --run runs/my-pilot
 
 The pilot config selects Apple MPS. Set `device` to `cuda` or `cpu` in a copied config for other hosts. Data, checkpoints, generated audio and local results are excluded from Git. The notebook documents the original experiment; its result cells require the locally generated `runs/pilot` artifacts and external Opus/tPLCnet comparison files. A fresh clone does not include those results or pretrained weights. Open it with `jupyter lab rmfsr.ipynb`; use the commands above for a new pilot.
 
-Checkpoint files include weights, EMA, optimizer, training step, data RNG, CPU/MPS/CUDA RNG, configuration, and metric history. Only load trusted local checkpoint files. To extend training, increase `steps` in a copied config; preserve `schedule_steps` for a consistent schedule. Full mode cannot resume a pilot checkpoint as though it were full training.
+Checkpoint files include weights, EMA, optimizer, training step, data RNG, CPU/MPS/CUDA RNG, configuration, verified audio-content/partition fingerprints, and metric history. Checkpoints from before the verified-content format and corrected targets require a fresh run. Only load trusted local checkpoint files. To extend training, increase `steps` in a copied config; preserve `schedule_steps` for a consistent schedule. Full mode cannot resume a pilot checkpoint as though it were full training.
 
 ## Full data preparation and training
 
@@ -124,4 +124,4 @@ EARS is **CC BY-NC 4.0**. Retain its attribution and license; these research che
 
 ## Cloud training preparation
 
-See [TRAINING.md](TRAINING.md) for the Figure 2 implementation audit, portable EARS/DNS/DAPS preparation, Runpod GPU comparison, benchmark scripts, and checkpoint recovery. `configs/runpod-estimate.json` contains the latest proposed effective-batch-16 training recipe; `configs/runpod.json` retains the earlier batch-4 recipe. Both use `figure2-v2` augmentations. Existing pilot results remain labeled as the legacy synthetic-noise pilot.
+See [TRAINING.md](TRAINING.md) for the Figure 2 implementation audit, portable EARS/DNS/DAPS preparation, Runpod GPU comparison, benchmark scripts, and checkpoint recovery. `configs/runpod-estimate.json` contains the latest proposed effective-batch-16 training recipe; `configs/runpod.json` retains the earlier batch-4 recipe. Both use `figure2-v2` augmentations. The training and benchmark scripts now default to the batch-16 estimate configs. Validation restores fixed damaged-only inputs at 1/2/5 steps, selects `best-validation.pt` by five-step waveform MSE, and saves gap/intact-region metrics plus review audio. Existing pilot results remain labeled as the legacy synthetic-noise pilot.

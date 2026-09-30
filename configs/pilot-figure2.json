@@ -30,5 +30,13 @@
   "augmentation_profile": "figure2-v2",
   "indexed_batches": true,
   "num_workers": 2,
-  "validation_pink_noise": true
+  "validation_pink_noise": true,
+  "inference_evaluations_to_compare": [
+    1,
+    2,
+    5
+  ],
+  "validation_selection_metric": "validation_restoration_mse_nfe5",
+  "validation_chunk_frames": 10,
+  "validation_audio_examples": 2
 }

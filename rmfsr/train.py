@@ -14,7 +14,6 @@ from .model import RMFSR
 from .spectral import Spectral
 from .flow import meanflow_loss
 from .data import SpeechPairs, assert_disjoint
-from .paths import manifest_fingerprint
 
 
 def device_for(name):
@@ -34,22 +33,34 @@ def get_ffmpeg(value):
 
 
 def input_fingerprints(cfg):
-    result = {key: manifest_fingerprint(cfg[key]) for key in ('train_manifest', 'validation_manifest')}
-    if cfg.get('ltas_path'):
-        from .download import digest
-        result['ltas'] = digest(cfg['ltas_path'])
-    if cfg.get('noise_completion'):
-        from .download import digest
-        result['noise_inventory'] = digest(cfg['noise_completion'])
-    return result
+    """Verify once when starting a process, never during each checkpoint save."""
+    from .preflight import check
+    readiness = check(cfg)
+    if not readiness['ready']:
+        raise ValueError('Training inputs incomplete: ' + '; '.join(readiness['problems']))
+    return readiness['input_fingerprints']
 
 
-def save_checkpoint(path, model, ema, optimizer, step, cfg, pairs, history, best=float('inf')):
+def validation_selection_metric(cfg):
+    evaluations = cfg.get('inference_evaluations_to_compare', [1, 2, 5])
+    if not isinstance(evaluations, (list, tuple)) or not evaluations or any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in evaluations):
+        raise ValueError('inference_evaluations_to_compare must contain positive integers')
+    if len(set(evaluations)) != len(evaluations):
+        raise ValueError('inference_evaluations_to_compare must contain unique values')
+    allowed = {f'validation_restoration_mse_nfe{n}' for n in evaluations}
+    selected = cfg.get('validation_selection_metric', f'validation_restoration_mse_nfe{max(evaluations)}')
+    if selected not in allowed:
+        raise ValueError('Select a restoration MSE metric from the configured inference evaluations')
+    return selected
+
+
+def save_checkpoint(path, model, ema, optimizer, step, cfg, pairs, history, best=float('inf'), verified_inputs=None):
     data = dict(model=model.state_dict(), ema=ema.state_dict(), optimizer=optimizer.state_dict(),
                 step=step, config=cfg, torch_rng=torch.get_rng_state(),
                 numpy_rng=np.random.get_state(), python_rng=random.getstate(),
                 data_rng=pairs.rng.bit_generator.state, history=history[-1000:],
-                best_validation=best, input_fingerprints=input_fingerprints(cfg))
+                best_validation=best, validation_selection_metric=validation_selection_metric(cfg),
+                input_fingerprints=verified_inputs if verified_inputs is not None else input_fingerprints(cfg))
     if torch.backends.mps.is_available():
         data['mps_rng'] = torch.mps.get_rng_state()
     if torch.cuda.is_available():
@@ -59,25 +70,10 @@ def save_checkpoint(path, model, ema, optimizer, step, cfg, pairs, history, best
     os.replace(temp, path)
 
 
-def validate(ema, validation, spectral, cfg, device):
-    validation.rng = np.random.default_rng(cfg['seed'] + 1000)
-    # Use a separate CPU RNG stream so validation cannot change training's sequence.
-    generator = torch.Generator().manual_seed(cfg['seed'] + 2000)
-    totals = np.zeros(2)
-    count = cfg.get('validation_examples', 1)
-    for _ in range(count):
-        clean, damaged = validation.batch(1)
-        x, y = spectral.encode(clean).to(device), spectral.encode(damaged).to(device)
-        t = x.new_full((1,), .5)
-        noise = torch.randn(x.shape, generator=generator)
-        if cfg.get('validation_pink_noise', False):
-            # Same frequency decay as training; normalize the variance per sample.
-            weights = torch.arange(x.shape[2]).float().clamp_min(1).rsqrt()[None, None, :, None]
-            noise = noise * weights / weights.square().mean().sqrt()
-        with torch.no_grad():
-            pred = ema(.5 * x + .5 * y + .15 * noise.to(device), y, t, t)
-            totals += [(pred - x).square().mean().item(), (y - x).square().mean().item()]
-    return dict(validation_dp_mse=totals[0] / count, validation_input_mse=totals[1] / count)
+def validate(ema, validation, spectral, cfg, device, output_dir=None, save_audio=False):
+    from .validation import validate_restoration
+    return validate_restoration(ema, validation, spectral, cfg, device,
+                                output_dir=output_dir, save_audio=save_audio)
 
 
 def backward_microbatches(model, batches, spectral, device, progress, count, schedule='legacy'):
@@ -105,6 +101,12 @@ def train(cfg, run, resume=None):
     readiness = check(cfg)
     if not readiness['ready']:
         raise ValueError('Training inputs incomplete: ' + '; '.join(readiness['problems']))
+    verified_inputs = readiness['input_fingerprints']
+    selection_metric = validation_selection_metric(cfg)
+    benchmark_progress = cfg.get('benchmark_flow_progress')
+    if benchmark_progress is not None:
+        if not cfg.get('benchmark_only') or isinstance(benchmark_progress, bool) or not isinstance(benchmark_progress, (int, float)) or not 0 <= benchmark_progress <= 1:
+            raise ValueError('benchmark_flow_progress requires benchmark_only and a value in [0,1]')
     torch.set_num_threads(cfg.get('threads', 8))
     seed = cfg['seed']
     torch.manual_seed(seed)
@@ -145,18 +147,24 @@ def train(cfg, run, resume=None):
             raise ValueError('Cannot switch augmentation sampling scheme on resume')
         if checkpoint['config'].get('augmentation_profile','legacy') != cfg.get('augmentation_profile','legacy'):
             raise ValueError('Cannot switch augmentation profile on resume')
-        for key, default in [('accumulation_steps', 1), ('flow_schedule', 'legacy')]:
+        for key, default in [('accumulation_steps', 1), ('flow_schedule', 'legacy'),
+                             ('benchmark_flow_progress', None), ('benchmark_only', False)]:
             if checkpoint['config'].get(key, default) != cfg.get(key, default):
                 raise ValueError(f'Resume mismatch: {key}')
         if checkpoint['config'].get('schedule_steps', checkpoint['config']['steps']) != cfg.get('schedule_steps', cfg['steps']):
             raise ValueError('Cannot change the learning schedule on resume')
-        if 'input_fingerprints' in checkpoint:
-            if checkpoint['input_fingerprints'] != input_fingerprints(cfg):
-                raise ValueError('Resume dataset content differs')
-        else:
-            for key in ('train_manifest', 'validation_manifest'):
-                if checkpoint['config'][key] != cfg[key]:
-                    raise ValueError(f'Legacy resume mismatch: {key}')
+        previous_inputs = checkpoint.get('input_fingerprints', {})
+        if previous_inputs.get('integrity_version') != verified_inputs.get('integrity_version'):
+            raise ValueError('Checkpoint predates verified-content fingerprints; start a new run')
+        if previous_inputs != verified_inputs:
+            raise ValueError('Resume dataset content or selected partitions differ')
+        if checkpoint.get('validation_selection_metric') != selection_metric:
+            raise ValueError('Cannot change the checkpoint selection metric on resume')
+        for key, default in [('validation_examples', 1), ('validation_chunk_frames', 10)]:
+            if checkpoint['config'].get(key, default) != cfg.get(key, default):
+                raise ValueError(f'Resume mismatch: {key}')
+        if checkpoint['config'].get('inference_evaluations_to_compare', [1, 2, 5]) != cfg.get('inference_evaluations_to_compare', [1, 2, 5]):
+            raise ValueError('Cannot change validation inference evaluations on resume')
         model.load_state_dict(checkpoint['model'])
         ema.load_state_dict(checkpoint['ema'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -197,7 +205,8 @@ def train(cfg, run, resume=None):
                     receptive_frames_per_evaluation=model.receptive_frames,
                     network_context_seconds=(model.receptive_frames - 1) * .01,
                     window_ms=20, paper_parameters=7800000, pilot=cfg['pilot'],
-                    quality_validated=False, config=cfg, inputs=input_fingerprints(cfg),
+                    quality_validated=False, config=cfg, inputs=verified_inputs,
+                    validation_selection_metric=selection_metric,
                     torch_version=torch.__version__, cuda_version=torch.version.cuda,
                     effective_batch_size=cfg['batch_size'] * accumulation)
     if device.type == 'cuda':
@@ -221,7 +230,8 @@ def train(cfg, run, resume=None):
             for group in optimizer.param_groups:
                 group['lr'] = lr
             optimizer.zero_grad(set_to_none=True)
-            diagnostics = backward_microbatches(model, batches, spectral, device, progress,
+            flow_progress = progress if benchmark_progress is None else benchmark_progress
+            diagnostics = backward_microbatches(model, batches, spectral, device, flow_progress,
                                                 accumulation, cfg.get('flow_schedule', 'legacy'))
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg['gradient_clip'], error_if_nonfinite=True)
             optimizer.step()
@@ -235,15 +245,21 @@ def train(cfg, run, resume=None):
             completed = step + 1
             row = dict(step=completed, lr=lr, gradient_norm=float(norm),
                        seconds=time.perf_counter() - tic,
-                       examples_seen=completed * cfg['batch_size'] * accumulation, **diagnostics)
+                       examples_seen=completed * cfg['batch_size'] * accumulation, flow_progress=flow_progress, **diagnostics)
             review_due = completed in cfg.get('quality_review_updates', [])
             if review_due:
                 row['quality_review_due'] = True
             improved = False
-            if completed % cfg['validate_every'] == 0 or completed == cfg['steps']:
-                row.update(validate(ema, validation, spectral, cfg, device))
-                if row['validation_dp_mse'] < best:
-                    best, improved = row['validation_dp_mse'], True
+            if completed % cfg['validate_every'] == 0 or completed == cfg['steps'] or review_due:
+                report_dir = run / 'validation' / f'step-{completed:08d}'
+                row.update(validate(ema, validation, spectral, cfg, device,
+                                    output_dir=report_dir, save_audio=review_due))
+                score = row[selection_metric]
+                if score is None or not math.isfinite(score):
+                    raise FloatingPointError('Nonfinite restoration checkpoint score')
+                row['validation_selection_metric'] = selection_metric
+                if score < best:
+                    best, improved = score, True
             history.append(row)
             history = history[-1000:]
             with (run / 'metrics.jsonl').open('a') as handle:
@@ -252,7 +268,7 @@ def train(cfg, run, resume=None):
             if cfg.get('max_wall_seconds') and time.perf_counter() - wall >= cfg['max_wall_seconds']:
                 stop[0] = True
             if completed % cfg['save_every'] == 0 or completed == cfg['steps'] or stop[0] or improved or review_due:
-                save_checkpoint(run / 'latest.pt', model, ema, optimizer, completed, cfg, pairs, history, best)
+                save_checkpoint(run / 'latest.pt', model, ema, optimizer, completed, cfg, pairs, history, best, verified_inputs=verified_inputs)
                 if improved:
                     shutil.copy2(run / 'latest.pt', run / 'best-validation.pt')
                 if review_due:

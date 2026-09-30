@@ -110,6 +110,10 @@ def corrupt(x,rng,sr,ffmpeg=None,codec_enabled=True,extra_quantization=False):
 
 def target_process(x,sr,reference_ltas=None):
     if reference_ltas is not None:
+        # make_ltas normalizes each DAPS recording to -25 dBFS before computing
+        # reference power. Match that level before EQ so gain limits constrain
+        # spectral shape rather than arbitrary recording-volume differences.
+        x=level(np.asarray(x,np.float64),-25)
         _,_,z=signal.stft(x,sr,nperseg=320,noverlap=160)
         power=(abs(z)**2).mean(axis=1)+1e-10
         # Smooth gain and constrain EQ to +/-6 dB (unspecified in paper).

@@ -6,7 +6,7 @@ This is an independent implementation of [RMFSR](https://arxiv.org/abs/2605.1625
 
 Rechecked the paper PDF and rendered Figure 1 on 2026-09-30. The schedule plot has an x-axis labeled **Epoch**, extending from 0 to 10,000. This is a plotted schedule range, not an explicitly reported optimizer-update budget or confirmation of the duration of every reported training run. The paper does not specify batch size, examples/updates per epoch, or a total optimizer-step count, so 10,000 cannot be converted into training steps. Our 300,000 updates are an experimental setting, not a verified author setting or a guarantee of matching performance.
 
-The plotted blue diagonal-sampling ratio starts near 1.0, falls to about 0.2 by epoch 5,000, and stays there; the orange span-shape curve reaches 1.0 around epoch 8,000. Our current implementation instead approximates the ratio with a 0.75-to-0.25 sigmoid and runs the span cosine over the whole configured budget. The paper's discussion of 75%/25% describes previous MF/IMF choices, not enough to justify claiming our schedule matches the proposed plotted schedule. Resolve this along with the architecture discrepancy before a claim of matching the paper. Do not silently change an existing run's schedule.
+The plotted blue diagonal-sampling ratio starts near 1.0, falls to about 0.2 by epoch 5,000, and stays there; the orange span-shape curve reaches 1.0 around epoch 8,000. The selected `figure1-cosine-approx` configuration maps these endpoints to 50% and 80% of our update budget with smooth cosine interpolation. The earlier `legacy` schedule retains its 0.75-to-0.25 sigmoid for explicit legacy experiments. The paper's discussion of 75%/25% describes previous MF/IMF choices. Our endpoint approximation does not establish the authors' exact epoch definition or interpolation.
 
 Primary evidence: [paper, Figure 1 and section 2.4](https://arxiv.org/html/2605.16251v1#S2.F1), [original vector figure](https://arxiv.org/html/2605.16251v1/r_schedule.svg). Needed author details: epoch definition, total updates, effective batch size, crop duration, optimizer/LR schedule, exact model configuration and augmentation settings. Judge quality on the reported evaluation protocol, not step count alone.
 
@@ -18,12 +18,12 @@ Primary evidence: [paper, Figure 1 and section 2.4](https://arxiv.org/html/2605.
 | Shared room / distinct RIRs | Same dimensions, microphone and reflection coefficient; different source position per talker. Finite order-2 image-source approximation, not an exact room simulator. |
 | Direct RIR target branch | Direct path only, using the same per-talker gain and propagation delay as the degraded branch. |
 | Per-source spectral/level augmentation | New `figure2-v2` profile applies broad EQ to each reverberant speech source and to noise; speech mixing gains, noise SNR and overall input level vary. EQ range and filter are our choices. |
-| Studio processing | DAPS LTAS auto-EQ, mild compression, fixed -25 dBFS target level implemented. Actual DAPS corpus/LTAS must be prepared before full mode runs. |
+| Studio processing | DAPS LTAS auto-EQ with matching -25 dBFS source/reference level before bounded EQ, mild compression, fixed -25 dBFS target level implemented. Actual DAPS corpus/LTAS must be prepared before full mode runs. |
 | Microphone/recording chain | Six bandpass families, notch, static nonlinear distortions, level variation. Individual transfer functions are approximations. |
 | Digital processing | MP3 and GSM encode/decode, suppression, spectral masks, phase/allpass, amplitude modulation, optional quantization, and 10–80 ms dropouts. |
 | Noise source | DNS5 official noise archives; acquisition implemented and URLs checked. No additional classifier is used to screen residual speech in these archives. |
 
-The previous pilot used the `legacy` profile, synthetic noise, and no DAPS EQ. The new full/cloud configurations use `figure2-v2`. Old pilot checkpoints remain compatible with their old configuration. Switching profiles requires a fresh run. These settings cover the diagram's functional blocks but cannot recreate unpublished author settings exactly.
+The previous pilot used the `legacy` profile, synthetic noise, and no DAPS EQ. The new full/cloud configurations use `figure2-v2`. Recorded old pilot outputs remain available locally. The corrected target processing and verified-content checkpoint format require a fresh run; checkpoints from before these fixes are rejected on resume. These settings cover the diagram's functional blocks but cannot recreate unpublished author settings exactly.
 
 ## Data and storage
 
@@ -68,7 +68,7 @@ bash scripts/benchmark-gpu.sh
 bash scripts/train-runpod.sh
 ```
 
-The benchmark first measures a full-width, 4-second, batch-4, off-diagonal JVP update (20 timed repeats). It records peak allocated/reserved CUDA memory and compute-only timing. It then runs 100 actual training steps including data loading, augmentation, codecs, validation and checkpointing. Compare seconds/step, examples/second, peak memory and hourly-price × seconds/step / 3600. Reserve memory headroom; don't infer production throughput from the synthetic test alone. Local execution validates CPU/MPS logic, not CUDA performance.
+The benchmark first measures a full-width, 4-second, batch-4, off-diagonal JVP update (20 timed repeats). It records peak allocated/reserved CUDA memory and compute-only timing. It then runs 100 actual accumulated optimizer updates including data loading, augmentation, codecs, validation and checkpointing. Benchmark-only configs pin flow sampling at 90% schedule progress to exercise the late-training JVP workload; this override is rejected outside an explicitly marked benchmark. The synthetic profile measures one microbatch, while the default real-data benchmark uses four accumulation rounds. Compare seconds/step, examples/second, peak memory and hourly-price × seconds/step / 3600. Reserve memory headroom; don't infer production throughput from the synthetic test alone. Local execution validates CPU/MPS logic, not CUDA performance.
 
 ## Educated-estimate recipe (separate configuration)
 
@@ -78,7 +78,7 @@ The benchmark first measures a full-width, 4-second, batch-4, off-diagonal JVP u
 - 4.8 million augmented crops; 300,000 × 16 × 4 / 3,600 = **5,333 hours of mixture-duration exposure**. This is roughly 53 duration-equivalents of a hypothetical 100-hour corpus, not 53 literal epochs, unique speech hours, or statistically independent observations. Our previous batch-4/300k budget was 1,333 hours; this proposal is four times the data exposure and roughly four times the microbatch work.
 - AdamW at 1e-4, 5,000-update warmup, cosine decay to 1e-5; EMA .999; gradient norm clip 1. These are starting choices, not experimentally optimal settings.
 - New `figure1-cosine-approx` schedule: diagonal-data-prediction probability falls smoothly from 1 to .2 during the first 50% of the update budget; span exponent rises from .05 to 1 by 80%. Smooth cosine interpolation approximates the figure's endpoints; it does not establish the authors' exact sigmoid, epoch definition, or schedule implementation. At the start, targets predominantly reduce to data prediction; later training introduces longer MeanFlow spans.
-- Keep permanent quality-review checkpoints at 10k, 50k, 100k, 200k and 300k. The trainer flags these for review; perceptual metrics/listening are **not** automatically performed by that flag. Compare restoration at 1/2/5 network evaluations using held-out speech, gap-only error/energy, intact-speech distortion, intelligibility and hallucination checks. The regular 32-example validation MSE is a diagnostic, not a substitute for this evaluation.
+- Keep permanent quality-review checkpoints at 10k, 50k, 100k, 200k and 300k. At these updates the trainer also writes held-out restoration metrics and up to two audio comparisons under `runs/estimate/validation/step-NNNNNNNN/`. Every 1,000 updates, validation restores the same 32 examples from damaged audio plus fixed independent noise at 1/2/5 network evaluations. It reports waveform MSE, gap MSE, intact-region MSE, and STOI when enough nonsilent audio exists. `best-validation.pt` is selected by `validation_restoration_mse_nfe5`; the teacher-input diagonal MSE remains a separate diagnostic. Listening, transcript accuracy and hallucination assessment still require review.
 - Consider an extension to 500k only if held-out quality is still improving. Keep the original 300k schedule and use its final learning rate for an extension, or design an explicitly separate continuation; resume rejects silent schedule changes.
 
 Why this is reasonable: more independent corruptions improve the stochastic estimate of the expected training loss; accumulation reduces gradient sampling variance without requiring the entire effective batch in memory. It does not establish a power law from updates to MOS, eliminate model/augmentation approximation error, or guarantee published quality. Parameter count alone cannot determine the necessary number of updates. The architecture remains our measured 5.42M-parameter version.
@@ -118,9 +118,9 @@ We can profile an exported fixed-shape model with current/random weights before 
 
 - Deterministic per-step augmentation, four spawned CPU workers, bounded prefetch and per-worker audio cache. Worker scheduling/count cannot change a resumed example sequence.
 - AdamW, warmup/cosine schedule, EMA, finite loss/gradient checks; full-shape JVP loss already tested locally.
-- Speaker-separated validation, separate DNS noise partition, fixed corruption/noise seeds. 16-example validation MSE is a diagnostic; it is not evidence of perceptual restoration quality.
+- Speaker-separated validation, verified separate DNS noise partitions, fixed corruption/noise seeds. Validation noise generators and pair RNG are isolated from training; all NFEs receive identical noise. Actual restoration metrics use clean audio only as the comparison reference.
 - Atomic `latest.pt`, `best-validation.pt`, and the latest three milestone checkpoints. Save model, EMA, optimizer, RNG states, dataset fingerprints and configuration. Actual logs stay in JSONL rather than growing each checkpoint indefinitely.
-- Resume verifies data/config identity. Prefetched but unused batches are regenerated by step index. Checkpoints are trusted local artifacts; do not load untrusted pickle checkpoints.
+- Startup verifies audio bytes against recorded SHA-256 and checks actual audio headers, full-corpus provenance, LTAS validity, and selected noise partition membership/content separation. Hashless legacy pilot manifests receive computed byte fingerprints; full mode requires recorded hashes. The verification map is cached for checkpoint writes, avoiding a corpus scan every 1,000 updates. Resume verifies this map and the checkpoint selection configuration; metadata-only old checkpoints require a fresh run. Prefetched but unused batches are regenerated by step index. Checkpoints are trusted local artifacts; do not load untrusted pickle checkpoints.
 - SIGINT/SIGTERM and a six-hour process limit finish the current step and checkpoint. **Process exit does not stop Runpod billing.** Stop/terminate the pod explicitly after preserving outputs; persistent volume charges continue. No pod or volume has been created by this preparation.
 - Train on data volume; never put the only checkpoint on an ephemeral container disk.
 
@@ -128,10 +128,20 @@ Before a long run: confirm actual CUDA VRAM/time, inspect paired audio, overfit 
 
 ## Deliverables
 
-- `configs/runpod.json`: full-data single-GPU run.
-- `configs/runpod-benchmark.json`: 100-step real-data benchmark, same schedule.
+- `configs/runpod-estimate.json`: default 300,000-update, effective-batch-16 full-data run.
+- `configs/runpod-estimate-benchmark.json`: default 100-update real-data benchmark with late-schedule flow sampling.
+- `configs/runpod.json` and `configs/runpod-benchmark.json`: earlier explicit batch-4 options.
 - `scripts/prepare-data.sh`: resumable full corpus preparation, then strict preflight.
 - `scripts/make-bundle.py`: allowlisted source-only archive; excludes credentials, unrelated projects, raw data and checkpoints.
 - `runs/cloud-preparation/`: local verification, source access metadata and data readiness report.
 
 Full training is intentionally blocked until the complete EARS/DNS/DAPS inputs exist. Passing a pilot check must not be mistaken for full-data readiness.
+
+## Training review fixes
+
+- LTAS target EQ is invariant to a positive change in source volume: source/reference power is measured at a shared level before gain clipping.
+- When every sample has `r=t`, the target is `clean + sigma_min*noise`; the expensive JVP and extra model passes are skipped. Mixed/off-diagonal batches retain the MeanFlow calculation. Regression tests compare losses and all parameter gradients.
+- Best checkpoint selection uses real damaged-only restoration. Diagonal prediction error alone cannot choose the best restoration checkpoint. Review checkpoints include JSON metrics and bounded, comparable audio exports.
+- Dataset fingerprints verify actual bytes and selected partitions. Verification happens once per process and does not repeatedly read all audio during checkpoint saves. Keep prepared datasets immutable during a process; a restart/resume verifies them again.
+
+The update target stays at **300,000**, effective batch **16**, with the same AdamW/EMA and approximate schedule. The fixes do not establish author architecture parity or demonstrate learned restoration quality.
