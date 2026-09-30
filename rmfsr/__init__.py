@@ -1,1 +1,1 @@
-"""Independent, explicitly approximate reproduction of Braun (2026), RMFSR."""
+"""Independent RMFSR implementation based on Braun (2026), with documented approximations."""

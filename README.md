@@ -1,6 +1,6 @@
-# RMFSR reproduction attempt — local research project
+# RMFSR
 
-This is an **independent, full-width implementation attempt**, not the authors' released model and not a verified reproduction of their results. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
+This is an **independent, full-width implementation attempt**, not the authors' released model and its results have not been validated against the paper. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
 
 ## Current result, September 30, 2026
 
@@ -59,8 +59,8 @@ No GAN, pretrained vocoder, latent autoencoder, or clean target is used at infer
 Clone and install from the repository root (Python 3.10+):
 
 ```bash
-git clone https://github.com/quangng2000/rmfsr-reproduction.git
-cd rmfsr-reproduction
+git clone https://github.com/quangng2000/rmfsr.git
+cd rmfsr
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -81,7 +81,7 @@ python -m rmfsr.preflight --config configs/pilot-figure2.json
 python -m rmfsr.train --config configs/pilot-figure2.json --run runs/my-pilot
 ```
 
-The pilot config selects Apple MPS. Set `device` to `cuda` or `cpu` in a copied config for other hosts. Data, checkpoints, generated audio and local results are excluded from Git. The notebook documents the original experiment; its result cells require the locally generated `runs/pilot` artifacts and external Opus/tPLCnet comparison files. A fresh clone does not include those results or pretrained weights. Open it with `jupyter lab rmfsr_reproduction.ipynb`; use the commands above for a new pilot.
+The pilot config selects Apple MPS. Set `device` to `cuda` or `cpu` in a copied config for other hosts. Data, checkpoints, generated audio and local results are excluded from Git. The notebook documents the original experiment; its result cells require the locally generated `runs/pilot` artifacts and external Opus/tPLCnet comparison files. A fresh clone does not include those results or pretrained weights. Open it with `jupyter lab rmfsr.ipynb`; use the commands above for a new pilot.
 
 Checkpoint files include weights, EMA, optimizer, training step, data RNG, CPU/MPS/CUDA RNG, configuration, and metric history. Only load trusted local checkpoint files. To extend training, increase `steps` in a copied config; preserve `schedule_steps` for a consistent schedule. Full mode cannot resume a pilot checkpoint as though it were full training.
 

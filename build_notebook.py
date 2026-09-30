@@ -3,7 +3,7 @@ from pathlib import Path
 n=nbf.v4.new_notebook();cells=[]
 def md(s):cells.append(nbf.v4.new_markdown_cell(s))
 def code(s):cells.append(nbf.v4.new_code_cell(s))
-md('''# RMFSR: full-width reproduction attempt
+md('''# RMFSR
 
 **Status: GPU pilot complete; full training and paper parity are not complete.**
 
@@ -31,7 +31,7 @@ md('''## 1. Network and parity audit
 
 The backbone uses all five reported channel widths, inverted residual blocks, a four-layer temporal bottleneck, frequency attention, and SnakeBeta. Temporal convolutions are causal; frequency downsampling never downsamples audio time.
 
-Our choices for attention, normalization, dilation and block wiring are explicit assumptions. **The parameter and compute counts do not match the paper**, so this is a reproduction attempt, not a validated replica.''')
+Our choices for attention, normalization, dilation and block wiring are explicit assumptions. **The parameter and compute counts do not match the paper**, so this is an independent implementation with unverified paper parity.''')
 code(r'''model = RMFSR()
 parameters = sum(p.numel() for p in model.parameters())
 display(Markdown(f"""| Measure | Our implementation | Paper |
@@ -145,4 +145,4 @@ else:
     print('Full training has not been launched. No cloud resources were provisioned.')''')
 n.cells=cells;n.metadata.kernelspec={'display_name':'RMFSR (PyTorch / MPS)','language':'python','name':'rmfsr'}
 n.metadata.language_info={'name':'python','version':'3.12'}
-nbf.write(n,Path(__file__).resolve().with_name('rmfsr_reproduction.ipynb'))
+nbf.write(n,Path(__file__).resolve().with_name('rmfsr.ipynb'))
