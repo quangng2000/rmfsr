@@ -163,9 +163,58 @@ class RMFSR(nn.Module):
         return y + self.head(h, emb, cache)
 
 
+def model_options(config):
+    """Validate architecture settings without allocating model parameters."""
+    kind = config.get('model_type', 'baseline')
+    if kind not in ('baseline', 'efficient-v1'):
+        raise ValueError(f'Unknown model_type: {kind!r}')
+    options = dict(channels=config.get('channels', (64,64,128,256,256)),
+                   encoder_dilations=config.get('encoder_dilations', (1,2,4,8,16)),
+                   tcn_dilations=config.get('tcn_dilations', (1,2,4,8)))
+    if kind == 'efficient-v1':
+        from .efficient import validate_options
+        if config.get('sample_rate', 16000) != 16000:
+            raise ValueError('efficient-v1 requires sample_rate=16000 (161 frequency bins)')
+        for key, expected in [('decoder_layout', 'mirror-v2'), ('decoder_before_upsample', True),
+                              ('bottleneck_attention', False), ('frequency_bins', 161),
+                              ('final_depthwise_frequency_refinement', True)]:
+            if key in config and config[key] != expected:
+                raise ValueError(f'efficient-v1 requires {key}={expected!r}')
+        options.update(groups=config.get('groups', 16), attention_rank=config.get('attention_rank', 16),
+                       folded_width=config.get('folded_width', 448))
+        validate_options(**options)
+    else:
+        if any(key in config for key in ('groups', 'attention_rank', 'folded_width')):
+            raise ValueError('Set model_type=efficient-v1 to use groups, attention_rank or folded_width')
+        options.update(decoder_layout=config.get('decoder_layout', 'mirror-v2'),
+                       bottleneck_attention=config.get('bottleneck_attention', False),
+                       decoder_before_upsample=config.get('decoder_before_upsample', False))
+    return kind, options
+
+
+def model_from_config(config):
+    """One factory for training and profiling; existing configs stay baseline."""
+    kind, options = model_options(config)
+    if kind == 'efficient-v1':
+        from .efficient import EfficientRMFSR
+        return EfficientRMFSR(**options)
+    return RMFSR(**options)
+
+
 def model_from_checkpoint(checkpoint):
     """Read trusted historical weights with their original decoder wiring."""
     architecture = checkpoint.get('architecture')
+    config = checkpoint['config']
+    kind = architecture.get('model_type', 'baseline') if architecture is not None else 'baseline'
+    if kind != config.get('model_type', 'baseline'):
+        raise ValueError('Checkpoint architecture differs from configured model_type')
+    if kind == 'efficient-v1':
+        model = model_from_config(config)
+        if architecture != model.architecture():
+            raise ValueError('Checkpoint architecture differs from the configured efficient-v1 model')
+        return model
+    if kind != 'baseline':
+        raise ValueError(f'Unknown checkpoint model_type: {kind!r}')
     layout = architecture['decoder_layout'] if architecture is not None else 'legacy-v1'
     model = RMFSR(channels=checkpoint['config']['channels'], decoder_layout=layout,
                   encoder_dilations=architecture.get('encoder_dilations', (1,2,4,8,16)) if architecture else (1,2,4,8,16),

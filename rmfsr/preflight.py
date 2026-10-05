@@ -13,6 +13,12 @@ from .paths import (FileVerifier, INTEGRITY_VERSION, verify_manifest,
 def check(config):
     cfg = dict(config) if isinstance(config, dict) else json.loads(Path(config).read_text())
     problems, info = [], {}
+    from .model import model_options
+    try:
+        model_type, _ = model_options(cfg)
+        info['model_type'] = model_type
+    except (ValueError, TypeError) as exc:
+        problems.append(f'Invalid model configuration: {exc}')
     pilot = cfg.get('pilot', False)
     verifier = FileVerifier()
     fingerprints = {'integrity_version': INTEGRITY_VERSION}

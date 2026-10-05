@@ -1,15 +1,17 @@
 # RMFSR
 
-This is an **independent, full-width implementation attempt**, not the authors' released model and its results have not been validated against the paper. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
+This repository contains an **independent implementation attempt** and opt-in experimental architectures. It is not the authors' released model and its results have not been validated against the paper. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
 
-## Current result, September 30, 2026
+## Current status, October 4, 2026
 
 - Implemented the five-level causal U-Net, four-layer TCN, frequency attention, SnakeBeta, data-prediction MeanFlow loss, and separate streaming state for each flow step.
 - Ran 100 training steps on the Mac **MPS GPU**, using one EARS training speaker and a different validation speaker. A third speaker is reserved for pilot testing. This is a plumbing/numerical pilot, not full training.
-- All 66 regression tests pass, covering training math, target EQ, verified datasets, actual restoration validation, causality, codecs, accumulation and checkpoint resume. A historical full-width (`legacy-v1`), effective-batch-16 MPS numerical smoke completed one update plus 1/2/5-step validation and review audio; this establishes execution, not restoration quality.
+- The September 30 baseline passed 66 regression tests, covering training math, target EQ, verified datasets, actual restoration validation, causality, codecs, accumulation and checkpoint resume. A historical full-width (`legacy-v1`), effective-batch-16 MPS numerical smoke completed one update plus 1/2/5-step validation and review audio; this establishes execution, not restoration quality.
 - Evaluated the checkpoint at 1/2/5 flow steps against the existing Opus/tPLCnet comparison inputs. **The pilot does not yet fill speech gaps**; its output is essentially the damaged input. Do not interpret this as evidence against the published method.
 - New runs use decoder outputs **`[256,256,128,64,64]`** (`mirror-v2`). The 100-step pilot used the older shifted decoder; it remains a historical result and cannot resume into the new architecture.
 - Added an optional capacity/efficiency study, with measured counts and a fair comparison plan in [ARCHITECTURE.md](ARCHITECTURE.md).
+- Added `efficient-v1`, an experimental engineering variant aimed at the paper's compute budget. Its recommended configuration has 7,742,598 parameters and counts 0.911 GMAC/audio-second/NFE for four-second calls, or 1.192 for one-frame calls. These operation counts do not establish runtime or audio quality; the author architecture has not been recovered.
+- All 76 tests pass after integration, including ten new checks for model selection, checkpoint round trips, legacy compatibility, compact attention accounting, causality, streaming, JVPs and a tiny save/resume/evaluation smoke test.
 - The proposed full run has **not started**. Full dataset preparation is pending, and architecture parity remains unresolved.
 
 ## Paper-to-code audit
@@ -34,7 +36,33 @@ This is an **independent, full-width implementation attempt**, not the authors' 
 | Full data | EARS p001–p099 train, p100–p103 validation, p104–p107 test; DNS noise; DAPS produced LTAS | Proposed speaker-disjoint split; full assets not prepared |
 | Paper evaluation | SIG2024, listening tests, MOS and WER | Not reproduced; current comparison is one held-out synthetic utterance |
 
-Do not pad the parameter count or alter widths arbitrarily just to match Table 1. Resolving the architecture discrepancy requires more author details or an explicitly documented architecture study. Do not quote the paper's compute or latency results as measurements of this implementation.
+The table describes the original mirrored backbone. The experimental `efficient-v1` family is a separate architecture study, selected explicitly below. Its active grouped layers, lower-rank attention and folded bottleneck change the computation; matching a parameter or MAC budget does not establish author parity. Do not quote the paper's compute or latency results as measurements of this implementation.
+
+### Experimental efficient architecture
+
+`configs/efficient.json` selects `model_type="efficient-v1"`, `groups=16`, `attention_rank=16` and `folded_width=448`. `configs/efficient-small.json` uses eight groups and folded width 256 for a smaller 4,532,742-parameter variant. Both retain the proposed full-data recipe from `runpod-estimate.json`: Figure 2 augmentation, the approximate Figure 1 flow schedule, four-second crops, effective batch 16 and 300,000 proposed updates. They choose the available device automatically. Existing configurations retain their original architecture.
+
+```bash
+# Forward-only operation counts; no dataset preparation or training.
+mkdir -p runs
+python -m rmfsr.profile --config configs/efficient.json --inventory-only --device cpu --seconds 4 --output runs/efficient-inventory-4s.json
+python -m rmfsr.profile --config configs/efficient.json --inventory-only --device cpu --seconds 0.01 --output runs/efficient-inventory-10ms.json
+python -m rmfsr.profile --config configs/efficient-small.json --inventory-only --device cpu --seconds 4 --output runs/efficient-small-inventory-4s.json
+
+# After full EARS/DNS/DAPS preparation and device qualification; starts fresh training.
+python -m rmfsr.preflight --config configs/efficient.json
+python -m rmfsr.train --config configs/efficient.json --run runs/efficient
+```
+
+The small variant counts 0.779 GMAC/audio-second/NFE for four-second calls and 1.009 for one-frame calls. Long calls amortize conditioning computations across more frames, so quote the call length with each MAC count. One-frame counts still exclude framework overhead, normalization, nonlinear functions, memory traffic and the STFT. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design tradeoffs and comparison protocol.
+
+These variants require new training and different weights. The checkpoint loader reconstructs the saved model type for evaluation; resume rejects a different architecture. To evaluate a newly trained checkpoint using the existing aligned comparison bundle:
+
+```bash
+python -m rmfsr.evaluate --checkpoint runs/efficient/best-validation.pt --baseline-dir /path/to/comparison-bundle --output runs/efficient/evaluation --steps 1 2 5 --chunk-frames 1
+```
+
+The comparison bundle must use the existing `opus_*ms` directory format with aligned references, damaged inputs, masks and baseline outputs. This command evaluates a checkpoint; it does not supply pretrained weights. No restoration-quality or measured real-time claim is supported for `efficient-v1`, and adding these configurations does not start training or provision compute.
 
 ### MeanFlow equations and choices
 

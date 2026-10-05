@@ -1,8 +1,57 @@
-# Architecture correction and educated study
+# Architecture studies and experimental compute budget
 
-The new default (`mirror-v2`) outputs decoder widths **[256,256,128,64,64]**, the reverse of encoder widths [64,64,128,256,256]. It replaces the old shifted sequence [256,128,64,64,64]. Skip mappings and attention widths follow the corrected stages. This is the literal stage-output reading of [paper section 3.2](https://arxiv.org/html/2605.16251v1#S3.SS2); exact author tensors and source are unavailable.
+The original mirrored control (`mirror-v2`) outputs decoder widths **[256,256,128,64,64]**, the reverse of encoder widths [64,64,128,256,256]. It replaces the old shifted sequence [256,128,64,64,64]. Skip mappings and attention widths follow the corrected stages. This is the literal stage-output reading of [paper section 3.2](https://arxiv.org/html/2605.16251v1#S3.SS2); exact author tensors and source are unavailable. Existing configurations still select this control or their explicitly configured ablation. The new `efficient-v1` models below are opt-in engineering experiments.
 
-## Measured counts
+## Experimental efficient-v1
+
+`efficient-v1` explores how to bring counted inference operations toward the paper's budget while preserving a causal five-stage spectral U-Net and data-prediction MeanFlow interface. It is a hypothesized engineering variant, not the recovered author architecture. It has no trained weights, validated restoration quality or measured real-time result.
+
+The recommended configuration is [configs/efficient.json](configs/efficient.json): `model_type="efficient-v1"`, 16 groups, attention rank 16 and folded width 448. The smaller [configs/efficient-small.json](configs/efficient-small.json) uses eight groups and folded width 256. Both keep encoder widths [64,64,128,256,256], their mirrored decoder widths, 2× residual-block expansion and four temporal blocks. The configuration selector is handled by `rmfsr.model.model_from_config`; the implementation is `rmfsr.efficient.EfficientRMFSR`.
+
+| Variant | Parameters | GMAC/audio-second/NFE, 4 s call | GMAC/audio-second/NFE, 10 ms call |
+|---|---:|---:|---:|
+| Efficient, 16 groups / width 448 | 7,742,598 | 0.910600064 | 1.192160000 |
+| Efficient small, 8 groups / width 256 | 4,532,742 | 0.778861440 | 1.008940800 |
+| Published RMFSR | About 7.8M | 1.22 reported, call length unspecified | Not reported separately |
+
+These are forward-operation inventories at batch one and 161 frequency bins. They count convolutions, linear layers and attention matrix products, including the compact attention's projected rank. They exclude nonlinear functions, normalization, softmax, memory traffic, framework overhead, audio transforms and data augmentation. They do not measure wall-clock speed or training cost. The paper's counting protocol is not fully specified, so this is a budget comparison, not verified efficiency parity.
+
+The call length matters: time-conditioning projections run once per network invocation, so a four-second call amortizes them over 400 frames. A one-frame call repeats that fixed work every 10 ms. The 10 ms column counts each invocation at one frame; it is neither a measured latency nor a hardware streaming benchmark. At multiple NFEs the model is evaluated repeatedly, and each flow step needs its own streaming state.
+
+### Computation and tradeoffs
+
+1. **Grouped stage mixing.** Encoder/decoder expansion and projection convolutions, shape-changing residual paths and skip mappings use grouped channel mixing. The effective group count divides both input and output widths. A channel shuffle follows expansion and SnakeBeta, before the depthwise convolution. This reduces expensive dense mixing, but each grouped layer can directly combine fewer channels. The shuffle and later dense projections offer communication across groups; quality still needs a matched training comparison.
+2. **Compact frequency attention.** Attention remains after all five encoder and decoder stages and operates within each time frame. Dense projections map the current channel width to rank-16 queries, keys and values, with four heads, and project the result back. This preserves global frequency interaction at lower counted cost while constraining its representational rank. It is a deliberate departure from the control's full-width attention.
+3. **Folded temporal bottleneck.** After frequency downsampling, six bins × 256 channels become 1,536 joint features at one frequency position. A conditioned projection maps these to width 448, followed by four dense inverted residual blocks with temporal kernel 11 and dilations [1,2,4,8]. A projection back to 1,536 features and reshape restores six × 256, with a residual connection. The small model uses width 256. These are active trainable layers, not unused tensors added to match a parameter total. Folding changes frequency weight sharing and compresses the joint representation; the resulting model is tied to the 161-bin input representation.
+4. **Decoder work before upsampling.** Each decoder block and attention layer operates at the lower frequency resolution, then upsamples by nearest neighbor. A final depthwise frequency kernel (3,1), SnakeBeta and residual connection refine the full 161-bin output before the prediction head. This reduces high-resolution work, but may limit fine spectral detail relative to full decoder processing after upsampling. The refinement is a mitigation to evaluate, not evidence that the loss of capacity is harmless.
+
+The model retains the existing channel-only normalization, Fourier time conditioning, causal temporal convolution and zero-initialized output residual around the degraded spectrum. It does not downsample time or add future-frame lookahead. Retaining this causal structure does not establish an end-to-end latency or real-time-performance result.
+
+### Count, train and evaluate
+
+```bash
+mkdir -p runs
+# These invocations count a forward pass and never update weights.
+python -m rmfsr.profile --config configs/efficient.json --inventory-only --device cpu --seconds 4 --output runs/efficient-inventory-4s.json
+python -m rmfsr.profile --config configs/efficient.json --inventory-only --device cpu --seconds 0.01 --output runs/efficient-inventory-10ms.json
+python -m rmfsr.profile --config configs/efficient-small.json --inventory-only --device cpu --seconds 4 --output runs/efficient-small-inventory-4s.json
+python -m rmfsr.profile --config configs/efficient-small.json --inventory-only --device cpu --seconds 0.01 --output runs/efficient-small-inventory-10ms.json
+
+# After completing full data preparation and qualifying the device.
+python -m rmfsr.preflight --config configs/efficient.json
+python -m rmfsr.train --config configs/efficient.json --run runs/efficient
+# Alternative separate fresh run; do not reuse the larger variant's weights.
+python -m rmfsr.train --config configs/efficient-small.json --run runs/efficient-small
+
+# After training, using the existing aligned opus_*ms comparison-bundle format.
+python -m rmfsr.evaluate --checkpoint runs/efficient/best-validation.pt --baseline-dir /path/to/comparison-bundle --output runs/efficient/evaluation --steps 1 2 5 --chunk-frames 1
+```
+
+The two configurations inherit `runpod-estimate.json`'s full EARS/DNS/DAPS recipe, `figure2-v2` augmentation, `figure1-cosine-approx` schedule, four-second crops, effective batch 16 and proposed 300,000 updates; the device is `auto`. This schedule and update budget remain experimental choices. Merely adding the configurations does not prepare data, train a model or provision compute.
+
+Each variant requires fresh training. Checkpoints record the architecture and the existing evaluation loader reconstructs it before loading weights. Resume rejects changes to the architecture, including model type, grouping, attention rank and folded width. Original checkpoints continue to use their original wiring; they cannot be loaded as efficient-model weights. Keep separate run directories, use the mirrored model as a control, and compare held-out restoration and listening results with identical data and corruption seeds. An operation-count target is only a screening criterion.
+
+## Original mirrored-control counts
 
 [architecture-audit.json](architecture-audit.json) records forward-hook measurements at batch one, 16 kHz, 161 frequency bins and 400 frames (four seconds). MAC counts include convolutions, linear layers and attention matrix products; they exclude nonlinear functions, norms, memory traffic and audio transforms. These are counts, not speed or restoration-quality measurements.
 
