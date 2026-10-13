@@ -6,6 +6,7 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import numpy as np
 import soundfile as sf
 import torch
@@ -85,7 +86,14 @@ class PipelineTests(unittest.TestCase):
                     entry = tarfile.TarInfo(name)
                     entry.size = len(audio.getvalue())
                     handle.addfile(entry, io.BytesIO(audio.getvalue()))
-            rows = convert_tar(archive, root, 'fixture', 'daps', 'fixture')
+            # This tiny archive tests path handling independently of host disk space.
+            # Exercise the real reserve guard too, without weakening production checks.
+            with patch('rmfsr.corpus.shutil.disk_usage') as disk_usage:
+                disk_usage.return_value.free = 16 * 1024**3
+                rows = convert_tar(archive, root, 'fixture', 'daps', 'fixture')
+                disk_usage.return_value.free = 0
+                with self.assertRaisesRegex(RuntimeError, 'preserve 8 GiB'):
+                    convert_tar(archive, root, 'fixture', 'daps', 'fixture')
             self.assertEqual(len(rows), 1)
             self.assertFalse((root.parent / 'outside.wav').exists())
             self.assertEqual(Path(rows[0]['path']).parts[0], 'produced')

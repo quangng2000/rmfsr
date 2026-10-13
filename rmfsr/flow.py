@@ -1,5 +1,7 @@
 import math
 import torch
+from ._vendor.meanflow import core as meanflow_core
+from ._vendor.meanflow import time_sampler
 
 def expand(t): return t[:,None,None,None]
 
@@ -25,7 +27,9 @@ def schedule_values(progress, schedule='legacy'):
     return diagonal_prob, gamma
 
 def sample_times(batch, progress, device, schedule='legacy'):
-    t = torch.sigmoid(torch.randn(batch,device=device)+.4).clamp_min(1e-4)
+    # Reuse the authors' logit-normal sampler; the span and diagonal schedules
+    # below are RMFSR speech adaptations, not the image sampler's independent r.
+    t = time_sampler.logit_normal_timestep_sample(.4, 1., batch, device).clamp_min(1e-4)
     diagonal_prob, gamma = schedule_values(progress, schedule)
     # Normalized span interpretation, explained in README (paper Eq14 ambiguous).
     r = t * torch.rand(batch,device=device).pow(gamma)
@@ -46,16 +50,30 @@ def meanflow_loss(model, clean, degraded, progress=0, sigma_max=.3, sigma_min=1e
         else:
             conditional_velocity = degraded-clean + (sigma_max-sigma_min)*noise
             instantaneous = (xt-model(xt,degraded,t,t))/tt
-            def velocity(z, end, start):
-                return (z-model(z,degraded,start,end))/expand(start)
-            _, jvp = torch.func.jvp(velocity, (xt,r,t),
-                                   (instantaneous,torch.zeros_like(r),torch.ones_like(t)))
-            # t*(V-v_c) == target_data - predicted_data; JVP must be stop-gradient.
-            target = xt - tt*conditional_velocity + tt*(tt-rr)*jvp
+            def velocity(z, start, end):
+                # The speech network predicts clean spectra and takes (t, r),
+                # while upstream's image network predicts velocity and (t, t-r).
+                return (z-model(z,degraded,start.flatten(),end.flatten()))/start
+            _, velocity_target = meanflow_core.velocity_target(
+                velocity, xt, tt, rr, conditional_velocity, tangent=instantaneous)
+            # IMF uses the model-derived instantaneous tangent, not the original
+            # MeanFlow conditional tangent. Convert upstream's detached velocity
+            # target to data space; retain RMFSR's MSE, with implicit t^2 weight.
+            target = xt - tt*velocity_target
     prediction = model(xt,degraded,t,r)
     loss = (prediction-target.detach()).square().mean()
     return loss, {'dp_mse':(prediction.detach()-clean).square().mean().item(),
                   'target_rms':target.square().mean().sqrt().item()}
+
+def restoration_step(model, x, degraded, t, r, cache=None):
+    """One speech data-prediction update, shared by offline and streaming paths.
+
+    The upstream image sampler takes one full-interval velocity step. Speech
+    restoration instead conditions on degraded spectra and retains one causal
+    cache per interval while integrating its data-prediction output.
+    """
+    prediction = model(x,degraded,t,r,cache=cache)
+    return x - expand(t-r)*(x-prediction)/expand(t)
 
 @torch.no_grad()
 def sample(model, degraded, steps=5, noise=None, chunk_frames=None):
@@ -66,8 +84,7 @@ def sample(model, degraded, steps=5, noise=None, chunk_frames=None):
         for i in range(steps):
             t = x.new_full((x.shape[0],),1-i/steps)
             r = x.new_full((x.shape[0],),1-(i+1)/steps)
-            pred = model(x,y,t,r,cache=None if caches is None else caches[i])
-            x = x - expand(t-r)*(x-pred)/expand(t)
+            x = restoration_step(model,x,y,t,r,cache=None if caches is None else caches[i])
         return x
     if chunk_frames is None: return solve(degraded,noise)
     caches = [{} for _ in range(steps)]

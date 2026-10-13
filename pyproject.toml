@@ -9,3 +9,6 @@ requires-python = ">=3.10"
 dependencies = ["torch==2.8.0", "numpy>=1.26,<3", "scipy>=1.11", "soundfile>=0.12", "matplotlib>=3.8", "pystoi>=0.4", "imageio-ffmpeg==0.6.0"]
 [tool.setuptools.packages.find]
 include = ["rmfsr*"]
+
+[tool.setuptools.package-data]
+"rmfsr._vendor.meanflow" = ["LICENSE", "*.json", "*.md", "upstream/*.txt", "upstream/*.md"]
