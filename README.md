@@ -2,7 +2,45 @@
 
 This repository contains an **independent implementation attempt** and opt-in experimental architectures. It is not the authors' released model and its results have not been validated against the paper. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
 
-## Current status, October 4, 2026
+## MeanFlow code reuse
+
+The shared MeanFlow operations now use a vendored subset of the authors'
+[official PyTorch implementation](https://github.com/Gsunshine/py-meanflow),
+pinned to commit `1f6d72d94247c8fdeb89489acca1a8007a6baf6c`. This is selective
+source reuse with documented adaptations, not an official RMFSR release or a
+new general-purpose training framework. No network access is needed at runtime.
+
+| Component | Source and responsibility |
+| --- | --- |
+| Logit-normal timestep sampling | Unmodified upstream `time_sampler.py`, called by `rmfsr.flow.sample_times` |
+| JVP and detached velocity target | Upstream-derived `rmfsr/_vendor/meanflow/core.py`; extracted from the official loss, with an explicit tangent override and device-independent autocast handling |
+| Speech loss and flow path | `rmfsr/flow.py`: degraded-audio conditioning, spectral pink noise, data prediction, the model-derived instantaneous tangent, and speech-specific span/diagonal schedules |
+| Speech inference | One shared restoration step used by offline and streaming audio, with separate causal state for each flow step |
+| Network, audio transforms and data pipeline | Existing speech components; model parameters, checkpoint structure and training recipe are retained |
+
+The official original MeanFlow loss uses the conditional path velocity as its
+JVP tangent and adaptively weights a velocity loss. RMFSR uses a model-derived
+tangent and a data-space loss instead. The adapter keeps those speech-paper
+choices explicitly; substituting the image loss would change the experiment.
+The authors' iMF PyTorch branch is inference-only, so it is not used as a
+purported PyTorch training dependency.
+
+See [upstream provenance and modifications](rmfsr/_vendor/meanflow/NOTICE.md),
+[the pinned file hashes](rmfsr/_vendor/meanflow/UPSTREAM.json), and
+[the upstream license](rmfsr/_vendor/meanflow/LICENSE). The PyTorch repository's
+license is **CC-BY-NC-SA-4.0**; it is distinct from the original JAX repository's
+MIT license. Vendored source and its license are included in built packages.
+
+Numerical tests compare the extracted core with the unmodified upstream loss,
+and compare the speech adapter's loss and parameter gradients with the previous
+RMFSR equations. Streaming and checkpoint-resume tests remain part of the suite.
+This refactor adds neither pretrained speech weights nor a new quality claim.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Historical status, October 4, 2026
 
 - Implemented the five-level causal U-Net, four-layer TCN, frequency attention, SnakeBeta, data-prediction MeanFlow loss, and separate streaming state for each flow step.
 - Ran 100 training steps on the Mac **MPS GPU**, using one EARS training speaker and a different validation speaker. A third speaker is reserved for pilot testing. This is a plumbing/numerical pilot, not full training.
@@ -21,7 +59,7 @@ This repository contains an **independent implementation attempt** and opt-in ex
 | Backbone width | Encoder `[64,64,128,256,256]`; decoder outputs `[256,256,128,64,64]`; depthwise expansion 2 | Literal stage-output mirror; exact author tensors unavailable |
 | Kernels | Encoder 3×3, decoder 3×2, TCN 1×11 | Matches stated kernels |
 | Flow path | Degraded mean; sigma .3 → 1e-8; compressed complex spectrum, exponent .3 | Matches stated formulation |
-| Training | Model-derived instantaneous JVP tangent; stop-gradient JVP; data-prediction loss | Independent equation implementation, analytically tested |
+| Training | Official upstream-derived JVP/target core; speech model-derived tangent and data-prediction loss | Explicit speech adapter, checked against upstream and the previous equations |
 | Time sampling | Logit-normal mean .4, SD 1; sigmoid diagonal ratio and cosine span schedule | Schedule endpoints/shapes inferred where unspecified |
 | Architecture size | **6,112,710 parameters**, measured **7.156 GMAC/audio-second/NFE** | Paper reports **7.8M / 1.22 GMAC/s**; substantial mismatch, not validated parity |
 | Context | 218 frames; **2.17 s past context** at 10 ms hop | Paper reports 2.13 s; exact dilations unspecified |

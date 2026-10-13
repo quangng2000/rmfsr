@@ -4,7 +4,7 @@ Analysis and synthesis are CPU; the real-valued neural network runs on device.
 import numpy as np
 import torch
 from .spectral import Spectral
-from .flow import pink_noise_like
+from .flow import pink_noise_like, restoration_step
 
 class StreamingSTFT:
     def __init__(self,spec=None):
@@ -57,7 +57,7 @@ class StreamingRestorer:
             y=frame.to(self.device);noise=pink_noise_like(frame,self.generator).to(self.device);x=y+.3*noise
             for i in range(self.steps):
                 t=x.new_tensor([1-i/self.steps]);r=x.new_tensor([1-(i+1)/self.steps])
-                prediction=self.model(x,y,t,r,cache=self.caches[i]);x=x-(t-r)*(x-prediction)/t
+                x=restoration_step(self.model,x,y,t,r,cache=self.caches[i])
             outputs.append(self.synthesis.push(x))
         return torch.cat(outputs) if outputs else torch.empty(0)
     def push(self,wave):

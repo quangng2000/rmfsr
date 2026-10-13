@@ -2,6 +2,26 @@
 
 This is an independent implementation of [RMFSR](https://arxiv.org/abs/2605.16251), not the authors' code or a pretrained RMFSR checkpoint. The existing 100-step pilot does not improve the packet-loss examples. The corrected mirrored decoder has 6.113M parameters and 7.156 GMAC/audio-second, compared with the paper's 7.8M and 1.22. The optional combined architecture study has 7.432M parameters and 5.473 GMAC/audio-second; neither matches the paper. See [ARCHITECTURE.md](ARCHITECTURE.md) for the hypotheses, measured 2×2 comparison and selection plan. The crop, batch, optimizer, 300,000-step budget, split, and unreported augmentation settings are our experiment choices.
 
+## Shared MeanFlow source and speech adapter
+
+Training calls a small, attributed extraction of the official PyTorch MeanFlow
+JVP/target core and the authors' unchanged logit-normal sampler. The upstream
+revision, exact source snapshots, hashes, license and local modifications are
+recorded in [the vendor notice](rmfsr/_vendor/meanflow/NOTICE.md). The extracted
+code is executed by `rmfsr.flow`; the snapshots are only for audit and parity tests.
+
+The adapter preserves RMFSR's degraded-audio prior, model-derived instantaneous
+tangent, data-space MSE, spectral noise and speech schedules. It intentionally
+does not adopt the original image model's conditional tangent or adaptive
+velocity-loss weighting. The all-diagonal shortcut, per-step streaming caches,
+configuration fields and checkpoint formats remain compatible. No dataset,
+training-budget or model-architecture change is required for this refactor.
+
+Run `python -m unittest discover -s tests -v` before training. This includes
+upstream loss/gradient comparisons, speech objective regression, and training
+resume/streaming checks. Passing these checks establishes numerical behavior,
+not restoration quality or equivalence to the published RMFSR model.
+
 ## Author training duration: unresolved
 
 Rechecked the paper PDF and rendered Figure 1 on 2026-09-30. The schedule plot has an x-axis labeled **Epoch**, extending from 0 to 10,000. This is a plotted schedule range, not an explicitly reported optimizer-update budget or confirmation of the duration of every reported training run. The paper does not specify batch size, examples/updates per epoch, or a total optimizer-step count, so 10,000 cannot be converted into training steps. Our 300,000 updates are an experimental setting, not a verified author setting or a guarantee of matching performance.

@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/Gsunshine/py-meanflow",
+  "commit": "1f6d72d94247c8fdeb89489acca1a8007a6baf6c",
+  "license": "CC-BY-NC-SA-4.0",
+  "files": [
+    {
+      "path": "time_sampler.py",
+      "upstream_path": "meanflow/models/time_sampler.py",
+      "sha256": "51b56a141a6244d6b5f3c1491c58147e39a65e9e2b4f2f94330508b6e2c5ef1d"
+    },
+    {
+      "path": "upstream/meanflow.py.txt",
+      "upstream_path": "meanflow/models/meanflow.py",
+      "sha256": "59ba2e10401386958a404aaa55e9cf71bdcebd129489a3142a6e57d8608b0e17"
+    },
+    {
+      "path": "LICENSE",
+      "upstream_path": "LICENSE",
+      "sha256": "37ea6e9c724977e696b7697555b621248eb263f397cc1bbe5067eda2c793d2d8"
+    },
+    {
+      "path": "upstream/README.md",
+      "upstream_path": "README.md",
+      "sha256": "1b57adb1bbc256c2065b29f9e14219a81d4fac8f980e3ea980d5f29afff4c4cf"
+    }
+  ]
+}
