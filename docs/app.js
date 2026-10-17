@@ -59,7 +59,7 @@
     const label = `${sample.title}: ${track.label}`;
     const trackId = `${sample.id}-${group}-${track.nfe ?? track.kind}`;
     const labelRow = element("div", "track-label-row");
-    const heading = element("h5", "", track.label);
+    const heading = element("h4", "", track.label);
     heading.id = `${trackId}-title`;
     card.setAttribute("aria-labelledby", heading.id);
     const download = element("a", "track-download", "WAV ↓");
@@ -255,7 +255,7 @@
   function makeGroup(title, note, tracks, sample, group) {
     const section = element("section", "track-group");
     const groupHeading = element("div", "group-heading");
-    const h4 = element("h4", "", title);
+    const h4 = element("h3", "", title);
     h4.id = `${sample.id}-${group}-heading`;
     section.setAttribute("aria-labelledby", h4.id);
     groupHeading.append(h4);
@@ -275,7 +275,7 @@
     number.setAttribute("aria-hidden", "true");
     const heading = element("div", "sample-heading");
     const displayTitle = sampleDisplayTitle(sample.title);
-    const h3 = element("h3", "", displayTitle);
+    const h3 = element("h2", "", displayTitle);
     h3.id = `${sample.id}-heading`;
     h3.setAttribute("aria-label", sample.title);
     heading.append(h3);
@@ -322,12 +322,6 @@
       if (!response.ok) throw new Error(`Manifest returned ${response.status}`);
       const data = await response.json();
       validateManifest(data);
-      const snapshot = document.getElementById("snapshot");
-      const values = snapshot.querySelectorAll("dd");
-      values[0].firstChild.textContent = `${Number(data.checkpoint.step).toLocaleString("en-US")} `;
-      values[1].textContent = data.checkpoint.weights;
-      values[2].firstChild.textContent = `${data.sample_rate / 1000} `;
-      values[3].textContent = data.checkpoint.frequency_width;
       const spectrum = data.spectrogram;
       const gainDb = data.playback?.common_gain_db;
       const gainLabel = Number.isFinite(gainDb)

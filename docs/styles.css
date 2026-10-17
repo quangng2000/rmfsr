@@ -36,20 +36,9 @@ button, a, input, summary { touch-action: manipulation; }
 .wave-mark i:nth-child(3) { height: 26px; }
 .repo-link { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; color: var(--muted); text-decoration: none; }
 .repo-link span { font-size: 20px; }
-.intro { padding: 44px 0 32px; }
-.eyebrow { margin: 0 0 12px; color: var(--accent); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; font-weight: 650; }
-h1 { margin: 0; font-size: clamp(30px, 3.4vw, 48px); line-height: 1.16; letter-spacing: -.035em; font-weight: 650; }
-.intro-description { margin: 16px 0 28px; max-width: 720px; color: var(--muted); font-size: 17px; line-height: 1.6; }
-.snapshot { display: flex; flex-wrap: wrap; gap: 20px 0; margin: 0; }
-.snapshot > div { padding: 0 32px; border-left: 1px solid var(--border); }
-.snapshot > div:first-child { padding-left: 0; border-left: 0; }
-.snapshot dt { color: var(--subtle); font-size: 12px; margin-bottom: 4px; }
-.snapshot dd { margin: 0; font-family: var(--mono); font-size: 18px; letter-spacing: -.04em; }
-.snapshot dd span { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; color: var(--muted); letter-spacing: 0; }
-.snapshot-note { margin: 18px 0 0; color: var(--subtle); font-size: 12px; }
-.listening-section { padding-top: 26px; border-top: 1px solid var(--border); }
+.listening-section { padding-top: 26px; }
 .section-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -.015em; }
+h1, h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -.015em; }
 .section-helper { margin: 7px 0 0; color: var(--muted); font-size: 14px; }
 .stop-button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 9px; padding: 10px 15px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); min-height: 44px; font-size: 13px; transition: background .15s, border-color .15s; }
 .stop-button:not(:disabled):hover { background: var(--surface-hover); border-color: var(--subtle); }
@@ -73,18 +62,18 @@ h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spa
 .sample-header { display: flex; align-items: flex-start; gap: 14px; padding: 20px 24px 18px; background: var(--surface-raised); border-bottom: 1px solid var(--border); }
 .sample-number { display: flex; flex-shrink: 0; align-items: center; justify-content: center; height: 30px; width: 30px; margin-top: 1px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 12px; color: var(--accent); }
 .sample-heading { flex: 1; min-width: 0; }
-.sample-header h3 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.015em; }
+.sample-header h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.015em; }
 .sample-description { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
 .sample-duration { flex-shrink: 0; margin-top: 5px; font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
 .track-group { padding: 18px 22px 16px; }
 .track-group + .track-group { border-top: 1px solid var(--border); }
 .group-heading { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 13px; }
-.group-heading h4 { margin: 0; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 650; }
+.group-heading h3 { margin: 0; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 650; }
 .group-heading span { color: var(--subtle); font-size: 11px; }
 .tracks-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .track { min-width: 0; }
 .track-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; min-height: 25px; }
-.track h5 { margin: 0; font-size: 13px; font-weight: 600; }
+.track h4 { margin: 0; font-size: 13px; font-weight: 600; }
 .track-download { color: var(--subtle); font-size: 10px; font-family: var(--mono); text-decoration: none; letter-spacing: .04em; padding: 6px 4px; }
 .track-download:hover { color: var(--accent); }
 .spectrogram-wrap { position: relative; padding-left: 25px; }
@@ -132,7 +121,6 @@ h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spa
   .page-shell { padding: 0 28px; }
   .tracks-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
   .spectrogram-button { aspect-ratio: 2.7; }
-  .snapshot > div { padding-right: 24px; padding-left: 24px; }
   .track-label-row { margin-bottom: 6px; }
 }
 @media (max-width: 600px) {
@@ -140,14 +128,6 @@ h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spa
   .site-header { min-height: 70px; gap: 12px; }
   .wordmark { font-size: 16px; }
   .repo-link { font-size: 12px; gap: 6px; }
-  .intro { padding: 30px 0 26px; }
-  .eyebrow { font-size: 10px; letter-spacing: .11em; }
-  h1 { font-size: 34px; }
-  .intro-description { font-size: 15px; margin: 14px 0 24px; }
-  .snapshot { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  .snapshot > div { padding: 0; border: 0; }
-  .snapshot > div:nth-child(even) { border-left: 1px solid var(--border); padding-left: 18px; }
-  .snapshot-note { font-size: 11px; line-height: 1.6; }
   .section-toolbar { align-items: flex-start; flex-wrap: wrap; }
   .section-helper { font-size: 13px; }
   .stop-button { min-height: 44px; padding: 9px 12px; }
@@ -156,13 +136,13 @@ h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spa
   .sample-navigation { margin: 18px 0 16px; }
   .sample-navigation a { min-height: 44px; }
   .sample-header { padding: 16px; gap: 10px; flex-wrap: wrap; }
-  .sample-header h3 { font-size: 16px; }
+  .sample-header h2 { font-size: 16px; }
   .sample-description { font-size: 12px; }
   .sample-duration { font-size: 11px; margin-left: 40px; margin-top: -7px; }
   .track-group { padding: 16px 14px; }
   .tracks-grid { grid-template-columns: minmax(0, 1fr); gap: 23px; }
   .spectrogram-button { aspect-ratio: 2.65; }
-  .track h5 { font-size: 14px; }
+  .track h4 { font-size: 14px; }
   .track-download { min-height: 44px; display: flex; align-items: center; padding: 0 8px; margin-top: -8px; margin-bottom: -8px; }
   .frequency-axis, .time-axis { font-size: 10px; }
   .player-seek { height: 34px; margin-top: 2px; }

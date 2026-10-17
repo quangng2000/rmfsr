@@ -7,8 +7,8 @@
     <meta name="description" content="Listen to our 85,000-update RMFSR checkpoint on eight recordings from the paper's demo. Explore audio and log-magnitude spectrograms at NFE 1, 20, 50, and 100.">
     <meta name="theme-color" content="#101116">
     <title>RMFSR · Listening results</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="app.js?v=eight-20261017" defer></script>
+    <link rel="stylesheet" href="styles.css?v=intro-removed-20261017">
+    <script src="app.js?v=intro-removed-20261017" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#results">Skip to audio results</a>
@@ -19,23 +19,10 @@
       </header>
 
       <main>
-        <section class="intro" aria-labelledby="page-title">
-          <p class="eyebrow">Speech restoration / Listening study</p>
-          <h1 id="page-title">Listen. Look. Compare steps.</h1>
-          <p class="intro-description">Eight recordings from the paper’s demo, restored by our model at four sampling budgets. Play an audio clip directly from its spectrogram to hear what changes.</p>
-          <dl class="snapshot" id="snapshot" aria-label="Checkpoint details">
-            <div><dt>Checkpoint</dt><dd>85,000 <span>updates</span></dd></div>
-            <div><dt>Weights</dt><dd>EMA</dd></div>
-            <div><dt>Audio</dt><dd>16 <span>kHz · mono</span></dd></div>
-            <div><dt>Frequency width</dt><dd>1</dd></div>
-          </dl>
-          <p class="snapshot-note">A saved checkpoint snapshot, not a live training feed. NFE = number of function evaluations during restoration.</p>
-        </section>
-
         <section class="listening-section" id="results" aria-labelledby="results-title">
           <div class="section-toolbar">
             <div>
-              <h2 id="results-title">Eight audio examples</h2>
+              <h1 id="results-title">Eight audio examples</h1>
               <p class="section-helper">Click a spectrogram to play or pause. Use the slider to seek.</p>
             </div>
             <button class="stop-button" id="stop-all" type="button" disabled><span class="stop-symbol" aria-hidden="true"></span>Stop playback</button>
