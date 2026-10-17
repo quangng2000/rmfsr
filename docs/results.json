@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "checkpoint": {
+    "step": 85000,
+    "weights": "EMA",
+    "frequency_width": 1,
+    "sha256": "0ff452cbd2a8edd9808d80acb148138986e68fd050a9829245a64ed22f5c1f3a"
+  },
+  "nfes": [
+    1,
+    20,
+    50,
+    100
+  ],
+  "sample_rate": 16000,
+  "spectrogram": {
+    "n_fft": 512,
+    "hop_length": 128,
+    "min_db": -80,
+    "max_db": 0,
+    "window": "periodic Hann",
+    "frequency_scale": "linear",
+    "color_map": "viridis",
+    "colormap": "viridis",
+    "width": 640,
+    "height": 240,
+    "reference": "20 log10(abs(STFT) / sum(Hann window)), reference amplitude 1; common absolute -80 to 0 dB scale for all clips. No per-clip normalization. Spectrograms use the published PCM audio; 0 to 8 kHz vertically, time horizontally."
+  },
+  "playback": {
+    "format": "WAV PCM16",
+    "common_gain_db": 0.0,
+    "independent_normalization": false
+  },
+  "inference": {
+    "device": "cpu",
+    "noise_seed": 1510001,
+    "same_initial_noise_per_sample": true,
+    "chunk_frames": null,
+    "conditioning": "Frozen wavJEPA, offline aligned features",
+    "causal_streaming_evaluation": false
+  },
+  "samples": [
+    {
+      "id": "cplus",
+      "title": "C+ · Moderate degradation",
+      "description": "A four-second speech clip with moderate simulated degradation.",
+      "duration_seconds": 4.0,
+      "references": [
+        {
+          "audio": "assets/audio/cplus/input.wav",
+          "spectrogram": "assets/spectrograms/cplus/input.png",
+          "source_sha256": "789545d22f1aedaf3774ffe0eb5cb21f9a0962c56ce7c580a946d28ef89cf661",
+          "audio_sha256": "3788898f05d68d2fcbf92b3c5ad11f9a7d4c520667ad95e46d4509eb5add0955",
+          "spectrogram_sha256": "ad6c4683bd89c03986f810fa63b62decacc2b40b2aa769896628be936beff167",
+          "kind": "input",
+          "label": "Damaged input"
+        },
+        {
+          "audio": "assets/audio/cplus/clean.wav",
+          "spectrogram": "assets/spectrograms/cplus/clean.png",
+          "source_sha256": "57a56ee865125f2d2bf2f61ef6638383f9d12c287fbdb171a08d3c8cae2a7bb8",
+          "audio_sha256": "f8def23a9b845f733a7caa1c38eb6624e7226bdaf38da4b5a730f77bec603ac0",
+          "spectrogram_sha256": "d9b8179b76ffce2072f060c7023c88e19c4fd8a5e182862165b311e3f2dba8da",
+          "kind": "clean",
+          "label": "Clean reference"
+        }
+      ],
+      "outputs": [
+        {
+          "audio": "assets/audio/cplus/nfe1.wav",
+          "spectrogram": "assets/spectrograms/cplus/nfe1.png",
+          "source_sha256": "f031b2995097a1fd61333cf9ac7ba34fd8c69cb795b2310339d123bd9f725ed8",
+          "audio_sha256": "9ff9a8c71013ad18871f19701f396032149f4631006f2082333bae294c61b9c6",
+          "spectrogram_sha256": "c00e66c01cf31d31a34a9463c3dc928aee3a32cc42076574cc3e8a43a6b6c3b8",
+          "nfe": 1,
+          "label": "NFE 1"
+        },
+        {
+          "audio": "assets/audio/cplus/nfe20.wav",
+          "spectrogram": "assets/spectrograms/cplus/nfe20.png",
+          "source_sha256": "170e734736a7850730996056b87e8f9bdcbde0d95c0c11684ee78d4d29ffbce6",
+          "audio_sha256": "2a57886c4b78c55d4bc68106f95d47df1af4504ccbf041442ba8646d4b73a261",
+          "spectrogram_sha256": "7ad45a41fb475f8115db00244186ba5b5921c1b5e29b5e900f864229ca5fa9d9",
+          "nfe": 20,
+          "label": "NFE 20"
+        },
+        {
+          "audio": "assets/audio/cplus/nfe50.wav",
+          "spectrogram": "assets/spectrograms/cplus/nfe50.png",
+          "source_sha256": "a4aed5f59f8ac6b72b3f790859516f8809c62d9e6c802de651b7545a08b2e635",
+          "audio_sha256": "c8d436cce6fe546ee4172d60ea6c5846c3a5b02366f549eb6c0d70694312296c",
+          "spectrogram_sha256": "69f73a07bcb2cb6c4a42628c763be3128fd231727c028ac0189688fa7a9cd105",
+          "nfe": 50,
+          "label": "NFE 50"
+        },
+        {
+          "audio": "assets/audio/cplus/nfe100.wav",
+          "spectrogram": "assets/spectrograms/cplus/nfe100.png",
+          "source_sha256": "a5dfc4c00729e11c2707301bb9b31a56bdf667d2962ff8eb7bd70cca3e794e60",
+          "audio_sha256": "ebcf29e523f3857ceef4647a761462ec8c7e5c51463319f2a6a4b83793a84b46",
+          "spectrogram_sha256": "47be370abb935d845bcb3276b32e92e2e990ad8e187eac2a0cd1a8c7e151deba",
+          "nfe": 100,
+          "label": "NFE 100"
+        }
+      ],
+      "source_note": "Local C+ listening example; clean reference available. This is a single illustrative clip, not a dataset-wide evaluation.",
+      "conditioning_sha256": "b32aeb7107dd4b6b496509607843622f4f88aca51c9c2a6dd5c150760e8480a6"
+    },
+    {
+      "id": "wind",
+      "title": "Wind · Clipping and suppression",
+      "description": "A real recording affected by wind noise, clipping and noise suppression.",
+      "duration_seconds": 9.12,
+      "references": [
+        {
+          "audio": "assets/audio/wind/input.wav",
+          "spectrogram": "assets/spectrograms/wind/input.png",
+          "source_sha256": "55c551d7e921edf707d6952b38450c8a49342824af46d6f43a859e5ee2369363",
+          "audio_sha256": "e81ed874d7fa29ed96b3f9e9bb7c12cbda5018c4eee9aa30c11d1fb0a37b3eb2",
+          "spectrogram_sha256": "b8beeab386c9a581824472e5aef0054c62a34ab44d71591a1553cff4d945a410",
+          "kind": "input",
+          "label": "Damaged input"
+        }
+      ],
+      "outputs": [
+        {
+          "audio": "assets/audio/wind/nfe1.wav",
+          "spectrogram": "assets/spectrograms/wind/nfe1.png",
+          "source_sha256": "8bb3bc5018f18a7d7490240bd2b0f3481519d096436d12292e111306ac286f0d",
+          "audio_sha256": "5965c072f7a966c2b0fd3e31eecfbc4e98d982e479a878fb7c52e217c8ca63ce",
+          "spectrogram_sha256": "49f7bfaa15de4cec1b0ef0802c5d6c39cd597f409b31b71cb5123b5b679abfd7",
+          "nfe": 1,
+          "label": "NFE 1"
+        },
+        {
+          "audio": "assets/audio/wind/nfe20.wav",
+          "spectrogram": "assets/spectrograms/wind/nfe20.png",
+          "source_sha256": "caf17ddfca85d6872ce21dc7fcdedae019d37dc7e1685543fd5887db8bd210ba",
+          "audio_sha256": "cdb7bd4f88ec25301e63e9857fe040af1ed6f9ec8fbaf44f33d6e1dcad202218",
+          "spectrogram_sha256": "ed001473613515c68747ade2ff79c71593b4d282a4d0f1c9c762637b8f553902",
+          "nfe": 20,
+          "label": "NFE 20"
+        },
+        {
+          "audio": "assets/audio/wind/nfe50.wav",
+          "spectrogram": "assets/spectrograms/wind/nfe50.png",
+          "source_sha256": "cddf527d3087a1f0ba4bb0ece4e6bf2089191eb77276cac7c3b56692aa79a470",
+          "audio_sha256": "d257259a1ad4a7c439eba7a52e80583388968db94ce557644bca7a685f443def",
+          "spectrogram_sha256": "9b7802345cc71c0909735b41c5e9b0424e247f6c7ba68686307fb2adb4f740b7",
+          "nfe": 50,
+          "label": "NFE 50"
+        },
+        {
+          "audio": "assets/audio/wind/nfe100.wav",
+          "spectrogram": "assets/spectrograms/wind/nfe100.png",
+          "source_sha256": "6c5c853e602945e4f264588ee8d3d3fb7f47ae78c659ca0d6c386888a49531cb",
+          "audio_sha256": "ff946441114754b9f2bc981237f3167bc0145b4367842dac38aaeea9bad7da7f",
+          "spectrogram_sha256": "a646f4c1db163b6844d7fe3a9d26c2dfbbaf78195e9628be6832b3a62b6503bb",
+          "nfe": 100,
+          "label": "NFE 100"
+        }
+      ],
+      "source_note": "Wind input from the paper demo, sample 7 (NISQA recording); resampled to 16 kHz. No clean reference is available. All restoration outputs on this page are ours.",
+      "conditioning_sha256": "5e90afac71d5ac8d6dbca92aac54631f991febcdfc1deb4ed7d518644a082ff4",
+      "source_url": "https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/"
+    }
+  ]
+}

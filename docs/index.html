@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Listen to RMFSR speech restoration results from the 85,000-update checkpoint. Explore audio and log-magnitude spectrograms at NFE 1, 20, 50, and 100.">
+    <meta name="theme-color" content="#101116">
+    <title>RMFSR · Listening results</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#results">Skip to audio results</a>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="wordmark" href="./" aria-label="RMFSR home"><span class="wave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>RMFSR</a>
+        <a class="repo-link" href="https://github.com/quangng2000/rmfsr">View repository <span aria-hidden="true">↗</span></a>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow">Speech restoration / Listening study</p>
+          <h1 id="page-title">Listen. Look. Compare steps.</h1>
+          <p class="intro-description">Our current model, across four sampling budgets. Play an audio clip directly from its spectrogram to hear what changes.</p>
+          <dl class="snapshot" id="snapshot" aria-label="Checkpoint details">
+            <div><dt>Checkpoint</dt><dd>85,000 <span>updates</span></dd></div>
+            <div><dt>Weights</dt><dd>EMA</dd></div>
+            <div><dt>Audio</dt><dd>16 <span>kHz · mono</span></dd></div>
+            <div><dt>Frequency width</dt><dd>1</dd></div>
+          </dl>
+          <p class="snapshot-note">A saved checkpoint snapshot, not a live training feed. NFE = number of function evaluations during restoration.</p>
+        </section>
+
+        <section class="listening-section" id="results" aria-labelledby="results-title">
+          <div class="section-toolbar">
+            <div>
+              <h2 id="results-title">Audio examples</h2>
+              <p class="section-helper">Click a spectrogram to play or pause. Use the slider to seek.</p>
+            </div>
+            <button class="stop-button" id="stop-all" type="button" disabled><span class="stop-symbol" aria-hidden="true"></span>Stop playback</button>
+          </div>
+          <div class="legend-row">
+            <div class="spectral-legend" aria-label="Spectrogram color scale">
+              <span>Log magnitude</span>
+              <span class="color-scale" aria-hidden="true"></span>
+              <span class="scale-label" id="scale-label">−80 to 0 dB</span>
+            </div>
+            <p class="legend-note" id="legend-note">Shared scale · reference magnitude 1 · original relative loudness</p>
+          </div>
+          <div class="sample-navigation" id="sample-navigation" aria-label="Jump to example"></div>
+          <p class="page-status" id="page-status" role="status">Loading audio examples…</p>
+          <div id="samples"></div>
+          <p class="sr-only" id="playback-announcement" role="status" aria-live="polite"></p>
+          <noscript><p class="page-status">Enable JavaScript to use the audio players. The <a href="results.json">results manifest</a> lists all downloadable audio and spectrogram files.</p></noscript>
+        </section>
+
+        <section class="about-results" aria-labelledby="about-title">
+          <h2 id="about-title">About this snapshot</h2>
+          <div class="about-columns">
+            <p>All restored clips use the same checkpoint and the same starting noise within each example. Only NFE changes. Audio is presented at its saved relative level; individual outputs are not loudness-normalized.</p>
+            <p>This is an independent, experimental implementation using offline WavJEPA conditioning. More steps do not necessarily mean better speech. The C+ clip has a clean reference; the windy recording does not.</p>
+          </div>
+          <details class="technical-details">
+            <summary>Audio and spectrogram details</summary>
+            <p id="spectrogram-details">Window-normalized log-magnitude STFT spectrograms, with a shared reference magnitude of 1.</p>
+            <p id="checkpoint-details"></p>
+            <p><a href="results.json">Download the results manifest</a></p>
+          </details>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <span>RMFSR · Experimental results</span>
+        <a href="https://github.com/quangng2000/rmfsr">Code &amp; reproducibility <span aria-hidden="true">↗</span></a>
+      </footer>
+    </div>
+  </body>
+</html>
