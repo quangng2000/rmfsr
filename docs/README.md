@@ -1,6 +1,6 @@
 # RMFSR listening results
 
-Static GitHub Pages demo for the 85,000-update, frequency-width-1 EMA snapshot. It contains our C+ and wind examples at NFE 1, 20, 50, and 100, with playable audio and log-magnitude STFT images. It is a saved experimental snapshot, not a live training dashboard or the paper authors' model.
+Static GitHub Pages demo for the 85,000-update, frequency-width-1 EMA snapshot. It contains the eight degraded recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/), each restored by our model at NFE 1, 20, 50, and 100, with playable audio and log-magnitude STFT images. The page shows the source inputs and our outputs only. It is a saved experimental snapshot, not a live training dashboard or the paper authors' model.
 
 ## Preview
 
@@ -22,7 +22,9 @@ GitHub Pages serves the `docs/` folder on `main`. The `.nojekyll` file keeps the
 
 The images show linear-frequency, log-magnitude STFTs, with one fixed color scale across all samples and outputs. Exact FFT, hop, window, normalization, dB reference, and clipping limits are recorded in the manifest. These display spectrograms are not the model's compressed coefficient tensors.
 
-The C+ clean reference is provided for listening. The wind recording has no clean reference. The wind input is the sample labeled “wind noise, clipping, noise suppression” on the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/). No other model's restored output is included.
+The eight recordings follow the order of the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/); the wind example is sample 7, labeled “wind noise, clipping, noise suppression.” These are the demo's degraded inputs, processed at the model's 16 kHz mono rate. The earlier synthetic C+ example is no longer part of this gallery.
+
+No clean references are available for these eight recordings, so the page makes no clean-target metric claims. No other model's restored output is included. Our inference uses offline WavJEPA conditioning and does not establish real-time performance.
 
 ## Updating the snapshot
 

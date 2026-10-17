@@ -4,11 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <meta name="description" content="Listen to RMFSR speech restoration results from the 85,000-update checkpoint. Explore audio and log-magnitude spectrograms at NFE 1, 20, 50, and 100.">
+    <meta name="description" content="Listen to our 85,000-update RMFSR checkpoint on eight recordings from the paper's demo. Explore audio and log-magnitude spectrograms at NFE 1, 20, 50, and 100.">
     <meta name="theme-color" content="#101116">
     <title>RMFSR · Listening results</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="app.js" defer></script>
+    <script src="app.js?v=eight-20261017" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#results">Skip to audio results</a>
@@ -22,7 +22,7 @@
         <section class="intro" aria-labelledby="page-title">
           <p class="eyebrow">Speech restoration / Listening study</p>
           <h1 id="page-title">Listen. Look. Compare steps.</h1>
-          <p class="intro-description">Our current model, across four sampling budgets. Play an audio clip directly from its spectrogram to hear what changes.</p>
+          <p class="intro-description">Eight recordings from the paper’s demo, restored by our model at four sampling budgets. Play an audio clip directly from its spectrogram to hear what changes.</p>
           <dl class="snapshot" id="snapshot" aria-label="Checkpoint details">
             <div><dt>Checkpoint</dt><dd>85,000 <span>updates</span></dd></div>
             <div><dt>Weights</dt><dd>EMA</dd></div>
@@ -35,7 +35,7 @@
         <section class="listening-section" id="results" aria-labelledby="results-title">
           <div class="section-toolbar">
             <div>
-              <h2 id="results-title">Audio examples</h2>
+              <h2 id="results-title">Eight audio examples</h2>
               <p class="section-helper">Click a spectrogram to play or pause. Use the slider to seek.</p>
             </div>
             <button class="stop-button" id="stop-all" type="button" disabled><span class="stop-symbol" aria-hidden="true"></span>Stop playback</button>
@@ -59,7 +59,7 @@
           <h2 id="about-title">About this snapshot</h2>
           <div class="about-columns">
             <p>All restored clips use the same checkpoint and the same starting noise within each example. Only NFE changes. Audio is presented at its saved relative level; individual outputs are not loudness-normalized.</p>
-            <p>This is an independent, experimental implementation using offline WavJEPA conditioning. More steps do not necessarily mean better speech. The C+ clip has a clean reference; the windy recording does not.</p>
+            <p>This is an independent, experimental implementation using offline WavJEPA conditioning. The eight source recordings come from the <a href="https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/">paper authors’ demo</a>. No clean references are available for these examples. More steps do not necessarily mean better speech.</p>
           </div>
           <details class="technical-details">
             <summary>Audio and spectrogram details</summary>

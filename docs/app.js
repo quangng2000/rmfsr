@@ -26,6 +26,16 @@
     return `${Number(value.toFixed(2))} s`;
   }
 
+  function sampleAnchor(id) {
+    return id.startsWith("sample-") ? id : `sample-${id}`;
+  }
+
+  function sampleDisplayTitle(title) {
+    const match = title.match(/^Sample\s+\d+\s*\((.+)\)\s*$/i);
+    const label = (match ? match[1] : title).trim();
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
   function stopPlayback() {
     desiredPlayer = null;
     for (const player of players) {
@@ -258,15 +268,20 @@
 
   function makeSample(sample, index) {
     const section = element("section", "sample");
-    section.id = `sample-${sample.id}`;
+    section.id = sampleAnchor(sample.id);
     section.setAttribute("aria-labelledby", `${sample.id}-heading`);
     const header = element("div", "sample-header");
     const number = element("span", "sample-number", (index + 1).toString().padStart(2, "0"));
     number.setAttribute("aria-hidden", "true");
     const heading = element("div", "sample-heading");
-    const h3 = element("h3", "", sample.title);
+    const displayTitle = sampleDisplayTitle(sample.title);
+    const h3 = element("h3", "", displayTitle);
     h3.id = `${sample.id}-heading`;
-    heading.append(h3, element("p", "sample-description", sample.description));
+    h3.setAttribute("aria-label", sample.title);
+    heading.append(h3);
+    if (sample.description && !displayTitle.toLocaleLowerCase().includes(sample.description.trim().toLocaleLowerCase())) {
+      heading.append(element("p", "sample-description", sample.description));
+    }
     header.append(number, heading, element("span", "sample-duration", `${Number(sample.duration_seconds.toFixed(2))} sec / mono`));
     section.append(header);
     const cleanAvailable = sample.references.some((track) => track.kind === "clean");
@@ -314,9 +329,14 @@
       values[2].firstChild.textContent = `${data.sample_rate / 1000} `;
       values[3].textContent = data.checkpoint.frequency_width;
       const spectrum = data.spectrogram;
+      const gainDb = data.playback?.common_gain_db;
+      const gainLabel = Number.isFinite(gainDb)
+        ? `${gainDb < 0 ? "−" : gainDb > 0 ? "+" : ""}${Math.abs(gainDb).toFixed(1)} dB`
+        : "not recorded";
+      document.getElementById("legend-note").textContent = `Shared playback gain ${gainLabel} · relative loudness preserved`;
       document.getElementById("scale-label").textContent = `${spectrum.min_db} to ${spectrum.max_db} dB`;
       document.querySelector(".color-scale").dataset.colormap = spectrum.colormap || "viridis";
-      document.getElementById("spectrogram-details").textContent = `Audio: ${data.sample_rate.toLocaleString("en-US")} Hz, mono. Spectrograms: ${spectrum.n_fft}-sample STFT windows with a ${spectrum.hop_length}-sample hop; log magnitude displayed from ${spectrum.min_db} to ${spectrum.max_db} dB. ${spectrum.reference || "A shared reference magnitude of 1 is used for all window-normalized spectrograms."}`;
+      document.getElementById("spectrogram-details").textContent = `Audio: ${data.sample_rate.toLocaleString("en-US")} Hz, mono. Shared playback gain: ${gainLabel}, applied uniformly to every input and output; no per-clip normalization. Spectrograms: ${spectrum.n_fft}-sample STFT windows with a ${spectrum.hop_length}-sample hop; log magnitude displayed from ${spectrum.min_db} to ${spectrum.max_db} dB. ${spectrum.reference || "A shared reference magnitude of 1 is used for all window-normalized spectrograms."}`;
       const checkpointDetails = document.getElementById("checkpoint-details");
       checkpointDetails.append(document.createTextNode("Checkpoint SHA-256: "), element("code", "", data.checkpoint.sha256));
       const samples = document.getElementById("samples");
@@ -326,8 +346,9 @@
       data.samples.forEach((sample, index) => {
         samples.append(makeSample(sample, index));
         const link = element("a");
-        link.href = `#sample-${sample.id}`;
-        link.append(element("span", "nav-number", (index + 1).toString().padStart(2, "0")), document.createTextNode(sample.title));
+        link.href = `#${sampleAnchor(sample.id)}`;
+        link.setAttribute("aria-label", `Jump to ${sample.title}`);
+        link.append(element("span", "nav-number", (index + 1).toString().padStart(2, "0")), document.createTextNode(sampleDisplayTitle(sample.title)));
         nav.append(link);
       });
       status.hidden = true;
