@@ -322,6 +322,8 @@
       if (!response.ok) throw new Error(`Manifest returned ${response.status}`);
       const data = await response.json();
       validateManifest(data);
+      const stepLabel = data.checkpoint.step.toLocaleString("en-US");
+      document.querySelector(".section-helper").textContent = `${stepLabel}-update checkpoint · Click a spectrogram to play or pause. Use the slider to seek.`;
       const spectrum = data.spectrogram;
       const gainDb = data.playback?.common_gain_db;
       const gainLabel = Number.isFinite(gainDb)
@@ -332,7 +334,10 @@
       document.querySelector(".color-scale").dataset.colormap = spectrum.colormap || "viridis";
       document.getElementById("spectrogram-details").textContent = `Audio: ${data.sample_rate.toLocaleString("en-US")} Hz, mono. Shared playback gain: ${gainLabel}, applied uniformly to every input and output; no per-clip normalization. Spectrograms: ${spectrum.n_fft}-sample STFT windows with a ${spectrum.hop_length}-sample hop; log magnitude displayed from ${spectrum.min_db} to ${spectrum.max_db} dB. ${spectrum.reference || "A shared reference magnitude of 1 is used for all window-normalized spectrograms."}`;
       const checkpointDetails = document.getElementById("checkpoint-details");
-      checkpointDetails.append(document.createTextNode("Checkpoint SHA-256: "), element("code", "", data.checkpoint.sha256));
+      const conditioning = data.checkpoint.conditioning_architecture === "scm-positional-adn-v1"
+        ? "Positional time embeddings and adaptive double normalization"
+        : `Gaussian Fourier frequency width ${data.checkpoint.frequency_width}`;
+      checkpointDetails.replaceChildren(document.createTextNode(`${stepLabel} optimizer updates · ${data.checkpoint.weights} weights · ${conditioning}. Checkpoint SHA-256: `), element("code", "", data.checkpoint.sha256));
       const samples = document.getElementById("samples");
       const nav = document.getElementById("sample-navigation");
       samples.replaceChildren();

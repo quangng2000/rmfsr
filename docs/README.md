@@ -1,6 +1,6 @@
 # RMFSR listening results
 
-Static GitHub Pages demo for the 85,000-update, frequency-width-1 EMA snapshot. It contains the eight degraded recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/), each restored by our model at NFE 1, 20, 50, and 100, with playable audio and log-magnitude STFT images. The page shows the source inputs and our outputs only. It is a saved experimental snapshot, not a live training dashboard or the paper authors' model.
+Static GitHub Pages demo for the 107,713-update production EMA snapshot, using positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). It contains the eight degraded recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/), each restored by our model at NFE 1, 20, 50, and 100, with playable audio and log-magnitude STFT images. The page shows the source inputs and our outputs only. It is a saved experimental snapshot, not a live training dashboard or the paper authors' model. The experimental TEMF weights were not used.
 
 ## Preview
 
@@ -29,5 +29,18 @@ No clean references are available for these eight recordings, so the page makes 
 ## Updating the snapshot
 
 `scripts/build-results-page.py` creates the audio, spectrograms, and manifest from saved local evaluation artifacts. Run its `--help` for supported options. Rebuilding requires the corresponding local experiment artifacts and compatible inference code; they are not distributed with this static website. The committed website files can be served directly without them.
+
+To reproduce this snapshot locally, supply the trusted checkpoint and the separate artifact directory:
+
+```sh
+PYTHONPATH=. .venv/bin/python scripts/build-results-page.py \
+  --checkpoint runs/paper-evaluation/scm-107713-author-eight-20261018/checkpoint.pt \
+  --checkpoint-sha256 47d2b90f4f7e9dc549d63cc9a02d8224573ad5b8d75c42e14163406b2a19777f \
+  --run-directory runs/paper-evaluation/scm-107713-author-eight-20261018/mps \
+  --reuse-features-from runs/paper-evaluation/width1-85000-author-eight-20261017 \
+  --device mps --infer-missing
+```
+
+All outputs for a custom snapshot are regenerated from that checkpoint; only validated input audio and frozen encoder features are reused. Content hashes in asset URLs prevent browsers from replaying an earlier snapshot from cache.
 
 Keep the checkpoint label and provenance in sync with the exported outputs. Review the generated manifest and audio, preview the page, then commit the updated assets. Publishing the page never starts or changes training.

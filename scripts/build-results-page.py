@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Build our 85k width-1 gallery on the paper's eight original demo inputs.
+"""Build a saved-checkpoint gallery on the paper's eight original demo inputs.
 
 Cache features with the local transformers runtime (offline only):
   HF_HUB_OFFLINE=1 PYTHONPATH=. python scripts/build-results-page.py --prepare-features-only
-Run resumable CPU restoration with the local torch runtime:
+Run resumable local restoration with the torch runtime (CPU by default):
   PYTHONPATH=. python scripts/build-results-page.py --infer-missing
 Disjoint subsets can be run by separate processes, without building the page:
   PYTHONPATH=. python scripts/build-results-page.py --infer-missing --inference-only --samples 1,2,3,4
 With no flags, rebuild public assets from completed local runs.
+For a newer checkpoint, pass --checkpoint, --checkpoint-sha256 and
+--run-directory. Use --reuse-features-from to reuse verified encoder caches
+and --device mps to render on a local Apple GPU.
 
 No download, pod connection, training change, author restoration output, or
 clean reference is involved. Inference is saved after each NFE. Existing
@@ -39,6 +42,9 @@ SOURCE = EVAL / "author-demo-balanced-20261014-v1"
 RUN = EVAL / "width1-85000-author-eight-20261017"
 CHECKPOINT = EVAL / "width1-85000-nfe-20261017/checkpoint-00085000.pt"
 CHECKPOINT_SHA = "0ff452cbd2a8edd9808d80acb148138986e68fd050a9829245a64ed22f5c1f3a"
+CHECKPOINT_STEP = 85000
+CONDITIONING_ARCHITECTURE = "gaussian-fourier-v1"
+DEVICE = "cpu"
 MANIFEST_SHA = "60f8cd95359d3d7f51c9d5227cd6776e9ef359904e4688992eff5f43fa139946"
 ENCODER_REPOSITORY = "labhamlet/wavjepa-base"
 ENCODER_REVISION = "6be4a5093f6c9adbbd55e00b6e5b8f067aa03345"
@@ -105,7 +111,7 @@ def save_float(path: Path, wave: np.ndarray) -> None:
 
 def load_specs() -> list[dict]:
     require(sha(SOURCE / "manifest.json") == MANIFEST_SHA, "Pinned source manifest mismatch")
-    require(sha(CHECKPOINT) == CHECKPOINT_SHA, "Pinned width-1 checkpoint mismatch")
+    require(sha(CHECKPOINT) == CHECKPOINT_SHA, "Pinned checkpoint mismatch")
     manifest = read_json(SOURCE / "manifest.json")
     require([item["index"] for item in manifest["items"]] == list(range(1, 9)), "Expected exact eight inputs")
     specs = []
@@ -212,6 +218,55 @@ def configure_torch_cpu() -> None:
     torch.set_num_interop_threads(1)
 
 
+def checkpoint_identity() -> dict:
+    identity = {"step": CHECKPOINT_STEP, "weights": "EMA", "sha256": CHECKPOINT_SHA,
+                "conditioning_architecture": CONDITIONING_ARCHITECTURE}
+    if CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1":
+        identity["frequency_width"] = 1
+    return identity
+
+
+def configure_snapshot(checkpoint: Path, expected_sha: str, run_directory: Path) -> None:
+    """Read a trusted local snapshot without changing training or model weights."""
+    global CHECKPOINT, CHECKPOINT_SHA, CHECKPOINT_STEP, CONDITIONING_ARCHITECTURE, RUN
+    import torch
+
+    require(sha(checkpoint) == expected_sha, "Downloaded checkpoint digest mismatch")
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    architecture = saved["config"].get("conditioning_architecture")
+    require(architecture == "scm-positional-adn-v1", "Custom snapshots require positional/ADN conditioning")
+    require(isinstance(saved["step"], int) and saved["step"] > 0 and "ema" in saved,
+            "Incomplete checkpoint")
+    require(saved["config"]["sample_rate"] == SR, "Checkpoint sample rate mismatch")
+    for key, value in {"repository": ENCODER_REPOSITORY, "revision": ENCODER_REVISION}.items():
+        require(saved["config"]["wavjepa"][key] == value, "Checkpoint encoder mismatch")
+    CHECKPOINT, CHECKPOINT_SHA = checkpoint.resolve(), expected_sha
+    CHECKPOINT_STEP, CONDITIONING_ARCHITECTURE = saved["step"], architecture
+    RUN = run_directory.resolve()
+
+
+def reuse_features(specs: list[dict], source: Path) -> None:
+    for spec in specs:
+        if feature_record(spec, required=False) is not None:
+            continue
+        original_input = source / spec["id"] / "input.wav"
+        require(np.array_equal(audio(original_input, spec["samples"]), spec["wave"]),
+                f"Cached input waveform mismatch: {spec['id']}")
+        original_digest = sha(original_input)
+        original = dict(spec, directory=source / spec["id"], input_sha256=original_digest)
+        feature_record(original)
+        # Preserve the exact source container too: equal float samples can have
+        # different WAV-header bytes across libsndfile versions/write times.
+        shutil.copyfile(original_input, spec["input"])
+        spec["input_sha256"] = original_digest
+        input_record = read_json(spec["directory"] / "input.json")
+        input_record["input_sha256"] = original_digest
+        write_json(spec["directory"] / "input.json", input_record)
+        for name in ("features.pt", "features.json"):
+            shutil.copyfile(original["directory"] / name, spec["directory"] / name)
+        feature_record(spec)
+
+
 def prepare_features(specs: list[dict]) -> None:
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -262,12 +317,16 @@ def output_record(spec: dict, nfe: int, required: bool = True) -> dict | None:
         return None
     require(path.exists() and metadata.exists(), f"Missing/incomplete output: {spec['id']}/NFE{nfe}")
     record = read_json(metadata)
-    expected = {"complete": True, "checkpoint_sha256": CHECKPOINT_SHA, "training_step": 85000,
-                "weights": "EMA", "frequency_width": 1, "frequency_rms": FREQUENCY_RMS,
+    expected = {"complete": True, "checkpoint_sha256": CHECKPOINT_SHA, "training_step": CHECKPOINT_STEP,
+                "weights": "EMA",
                 "input_sha256": spec["input_sha256"], "input_audio_sha256": spec["input_audio_sha256"],
                 "conditioning_sha256": feature_record(spec)["conditioning_sha256"],
-                "noise_seed": SEED, "nfe": nfe, "device": "cpu", "samples": spec["samples"],
+                "noise_seed": SEED, "nfe": nfe, "device": DEVICE, "samples": spec["samples"],
                 "sample_rate": SR, "chunk_frames": None, "input_gain_db": 0}
+    if CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1":
+        expected.update(frequency_width=1, frequency_rms=FREQUENCY_RMS)
+    else:
+        expected["conditioning_architecture"] = CONDITIONING_ARCHITECTURE
     for key, value in expected.items():
         require(record.get(key) == value, f"Output provenance mismatch: {spec['id']}/NFE{nfe}/{key}")
     require(sha(path) == record["output_sha256"], f"Output digest mismatch: {spec['id']}/NFE{nfe}")
@@ -277,13 +336,15 @@ def output_record(spec: dict, nfe: int, required: bool = True) -> dict | None:
 
 def save_output_record(spec: dict, nfe: int, seconds: float, reused: bool) -> None:
     path = spec["directory"] / f"output_nfe{nfe}.wav"
-    record = {"complete": True, "checkpoint_sha256": CHECKPOINT_SHA, "training_step": 85000,
-              "weights": "EMA", "frequency_width": 1, "frequency_rms": FREQUENCY_RMS,
+    record = {"complete": True, "checkpoint_sha256": CHECKPOINT_SHA, "training_step": CHECKPOINT_STEP,
+              "weights": "EMA", "conditioning_architecture": CONDITIONING_ARCHITECTURE,
               "input_sha256": spec["input_sha256"], "input_audio_sha256": spec["input_audio_sha256"],
               "conditioning_sha256": feature_record(spec)["conditioning_sha256"],
-              "output_sha256": sha(path), "nfe": nfe, "noise_seed": SEED, "device": "cpu",
+              "output_sha256": sha(path), "nfe": nfe, "noise_seed": SEED, "device": DEVICE,
               "seconds": seconds, "samples": spec["samples"], "sample_rate": SR,
               "chunk_frames": None, "input_gain_db": 0, "reused_verified_output": reused}
+    if CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1":
+        record.update(frequency_width=1, frequency_rms=FREQUENCY_RMS)
     write_json(path.with_suffix(".json"), record)
 
 
@@ -328,32 +389,39 @@ def infer_missing(specs: list[dict]) -> None:
     spectral = Spectral(SR)
     for spec in specs:
         validate_features(spec, spectral, feature_record(spec))
-        if spec["index"] == 7:
+        if spec["index"] == 7 and CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1" and DEVICE == "cpu":
             reuse_wind(spec)
     pending = [(spec, [nfe for nfe in NFES if output_record(spec, nfe, required=False) is None]) for spec in specs]
     pending = [(spec, nfes) for spec, nfes in pending if nfes]
     if not pending:
         return
     checkpoint = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)
-    require(checkpoint["step"] == 85000, "Unexpected checkpoint step")
+    require(DEVICE != "mps" or torch.backends.mps.is_available(), "Apple GPU inference is unavailable")
+    require(checkpoint["step"] == CHECKPOINT_STEP, "Unexpected checkpoint step")
     model = model_from_checkpoint(checkpoint).cpu().eval().requires_grad_(False)
     model.load_state_dict(checkpoint["ema"], strict=True)
-    rms = float(model.embedding.frequencies.double().square().mean().sqrt())
-    require(abs(rms - FREQUENCY_RMS) < 1e-7, "Not the width-1 EMA")
+    if CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1":
+        rms = float(model.embedding.frequencies.double().square().mean().sqrt())
+        require(abs(rms - FREQUENCY_RMS) < 1e-7, "Not the width-1 EMA")
+    else:
+        require(model.architecture()["conditioning_architecture"] == CONDITIONING_ARCHITECTURE,
+                "Model conditioning architecture mismatch")
     for key, value in {"repository": ENCODER_REPOSITORY, "revision": ENCODER_REVISION}.items():
         require(checkpoint["config"]["wavjepa"][key] == value, "Checkpoint encoder mismatch")
-    require(all(parameter.device.type == "cpu" for parameter in model.parameters()), "CPU-only inference required")
+    model.to(DEVICE)
+    require(all(parameter.device.type == DEVICE for parameter in model.parameters()), "Inference device mismatch")
     del checkpoint
     for spec, nfes in pending:
-        features = validate_features(spec, spectral, feature_record(spec))
+        features = validate_features(spec, spectral, feature_record(spec)).to(DEVICE)
         y = spectral.encode(torch.from_numpy(spec["wave"]))
-        noise = pink_noise_like(y, torch.Generator().manual_seed(SEED))
+        noise = pink_noise_like(y, torch.Generator().manual_seed(SEED)).to(DEVICE)
+        y = y.to(DEVICE)
         for nfe in nfes:
             started = time.monotonic()
-            print(json.dumps({"sample": spec["id"], "nfe": nfe, "status": "CPU inference"}), flush=True)
+            print(json.dumps({"sample": spec["id"], "nfe": nfe, "status": f"{DEVICE} inference"}), flush=True)
             with torch.inference_mode():
                 predicted = sample(model, y, steps=nfe, noise=noise.clone(), conditioning=features)
-                output = spectral.decode(predicted, spec["samples"])[0].numpy()
+                output = spectral.decode(predicted.cpu(), spec["samples"])[0].numpy()
             require(output.shape == spec["wave"].shape and bool(np.isfinite(output).all()), "Invalid prediction")
             save_float(spec["directory"] / f"output_nfe{nfe}.wav", output)
             seconds = time.monotonic() - started
@@ -391,7 +459,7 @@ def build(specs: list[dict]) -> dict:
     gain = 1.0 if maximum < 1.0 else 0.95 / maximum
     manifest = {
         "schema_version": 1,
-        "checkpoint": {"step": 85000, "weights": "EMA", "frequency_width": 1, "sha256": CHECKPOINT_SHA},
+        "checkpoint": checkpoint_identity(),
         "nfes": NFES, "sample_rate": SR,
         "spectrogram": {
             "n_fft": 512, "hop_length": 128, "min_db": -80, "max_db": 0,
@@ -400,7 +468,7 @@ def build(specs: list[dict]) -> dict:
             "reference": "20 log10(abs(STFT) / sum(Hann window)), reference amplitude 1; common absolute -80 to 0 dB scale for all clips. No per-clip normalization. Spectrograms use the published PCM audio; 0 to 8 kHz vertically, time horizontally.",
         },
         "playback": {"format": "WAV PCM16", "common_gain_db": float(20 * np.log10(gain)), "independent_normalization": False},
-        "inference": {"device": "cpu", "noise_seed": SEED, "same_initial_noise_per_sample": True,
+        "inference": {"device": DEVICE, "noise_seed": SEED, "same_initial_noise_per_sample": True,
                       "chunk_frames": None, "conditioning": "Frozen wavJEPA, offline aligned features",
                       "encoder_repository": ENCODER_REPOSITORY, "encoder_revision": ENCODER_REVISION,
                       "causal_streaming_evaluation": False},
@@ -426,9 +494,11 @@ def build(specs: list[dict]) -> dict:
             require(float(np.max(np.abs(published - waves[key, name] * gain))) <= 1 / 32768 + 1e-7,
                     "PCM conversion exceeds 16-bit quantization error")
             spectrogram(published, DOCS / relative_image)
-            item = {"audio": relative_audio, "spectrogram": relative_image,
-                    "source_sha256": sha(source), "audio_sha256": sha(destination),
-                    "spectrogram_sha256": sha(DOCS / relative_image)}
+            audio_digest, image_digest = sha(destination), sha(DOCS / relative_image)
+            item = {"audio": relative_audio + f"?v={audio_digest[:16]}",
+                    "spectrogram": relative_image + f"?v={image_digest[:16]}",
+                    "source_sha256": sha(source), "audio_sha256": audio_digest,
+                    "spectrogram_sha256": image_digest}
             if name.startswith("nfe"):
                 nfe = int(name[3:])
                 item.update(nfe=nfe, label=f"NFE {nfe}")
@@ -443,13 +513,24 @@ def build(specs: list[dict]) -> dict:
 
 
 def main() -> None:
+    global DEVICE
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare-features-only", action="store_true", help="Prepare inputs and cache pinned wavJEPA features on CPU, then exit")
-    mode.add_argument("--infer-missing", action="store_true", help="Resume missing NFE outputs on CPU using prepared features")
+    mode.add_argument("--infer-missing", action="store_true", help="Resume missing NFE outputs locally using prepared features")
     parser.add_argument("--inference-only", action="store_true", help="Skip publishing after --infer-missing")
     parser.add_argument("--samples", help="Comma-separated indices 1..8, for feature preparation or inference-only")
+    parser.add_argument("--checkpoint", type=Path, help="Trusted local production checkpoint")
+    parser.add_argument("--checkpoint-sha256", help="Expected digest recorded when downloading the checkpoint")
+    parser.add_argument("--run-directory", type=Path, help="Separate local artifacts directory for this snapshot")
+    parser.add_argument("--reuse-features-from", type=Path, help="Existing eight-example directory with verified encoder caches")
+    parser.add_argument("--device", choices=("cpu", "mps"), default="cpu", help="Local inference device; no remote GPU use")
     arguments = parser.parse_args()
+    DEVICE = arguments.device
+    custom = (arguments.checkpoint, arguments.checkpoint_sha256, arguments.run_directory)
+    require(not any(custom) or all(custom), "A custom snapshot requires checkpoint, SHA-256, and run directory")
+    if arguments.checkpoint:
+        configure_snapshot(*custom)
     require(not arguments.inference_only or arguments.infer_missing, "--inference-only requires --infer-missing")
     require(not arguments.samples or arguments.prepare_features_only or arguments.inference_only,
             "Subsets require --prepare-features-only or --inference-only; a published page contains all eight")
@@ -460,6 +541,8 @@ def main() -> None:
         require(len(selected) == len(set(selected)) and all(1 <= value <= 8 for value in selected), "Invalid/duplicate sample indices")
         specs = [spec for spec in specs if spec["index"] in selected]
     prepare_inputs(specs)
+    if arguments.reuse_features_from:
+        reuse_features(specs, arguments.reuse_features_from)
     if arguments.prepare_features_only:
         prepare_features(specs)
         print(json.dumps({"features_complete": True, "samples": len(specs)}), flush=True)
@@ -470,7 +553,7 @@ def main() -> None:
         print(json.dumps({"inference_complete": True, "samples": [spec["index"] for spec in specs]}), flush=True)
         return
     manifest = build(specs)
-    files = [DOCS / item[field] for sample in manifest["samples"]
+    files = [DOCS / item[field].split("?", 1)[0] for sample in manifest["samples"]
              for item in sample["references"] + sample["outputs"] for field in ("audio", "spectrogram")]
     print(json.dumps({"complete": True, "audio_clips": len(files) // 2,
                       "assets_bytes": sum(path.stat().st_size for path in files),
