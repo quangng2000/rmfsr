@@ -83,10 +83,12 @@
     img.height = 240;
     img.loading = "lazy";
     img.decoding = "async";
+    const imageFallback = element("span", "image-fallback", "Spectrogram unavailable");
     img.addEventListener("error", () => {
-      const fallback = element("span", "image-fallback", "Spectrogram unavailable");
-      img.replaceWith(fallback);
-    }, { once: true });
+      img.hidden = true;
+      if (!imageFallback.isConnected) toggle.append(imageFallback);
+    });
+    img.addEventListener("load", () => { img.hidden = false; imageFallback.remove(); });
     const icon = element("span", "play-icon");
     icon.innerHTML = PLAY_ICON;
     icon.setAttribute("aria-hidden", "true");
@@ -124,7 +126,25 @@
     let seeking = false;
     let pendingSeek = null;
     let seekingMetadata = false;
-    const player = { audio, pending: false, render, label };
+    let sourceRevision = 0;
+    const player = { audio, pending: false, render, label, setMode };
+
+    function setMode(mode) {
+      const asset = mode === "matched" ? track.matched : track;
+      sourceRevision += 1;
+      player.pending = false;
+      seeking = seekingMetadata = false;
+      pendingSeek = null;
+      cancelAnimationFrame(frame);
+      audio.src = asset.audio;
+      audio.load();
+      img.src = asset.spectrogram;
+      download.href = asset.audio;
+      download.setAttribute("aria-label", `Download ${label}, ${mode === "matched" ? "RMS-matched" : "original relative levels"}, as WAV`);
+      error.hidden = true;
+      toggle.removeAttribute("aria-describedby");
+      render();
+    }
 
     function renderProgress() {
       const duration = Number.isFinite(audio.duration) ? audio.duration : sample.duration_seconds;
@@ -167,6 +187,7 @@
     }
 
     async function playOrPause() {
+      const revision = sourceRevision;
       if (desiredPlayer === player && (!audio.paused || player.pending)) {
         desiredPlayer = null;
         player.pending = false;
@@ -190,12 +211,13 @@
       render();
       try {
         await audio.play();
+        if (revision !== sourceRevision) return;
         player.pending = false;
         if (desiredPlayer !== player) audio.pause();
         else announcement.textContent = `Playing ${label}.`;
         render();
       } catch (reason) {
-        if (desiredPlayer !== player || reason.name === "AbortError") return;
+        if (revision !== sourceRevision || desiredPlayer !== player || reason.name === "AbortError") return;
         showError("Audio could not play. Click to retry, or download the WAV file.");
       }
     }
@@ -340,6 +362,8 @@
       checkpointDetails.replaceChildren(document.createTextNode(`${stepLabel} optimizer updates · ${data.checkpoint.weights} weights · ${conditioning}. Checkpoint SHA-256: `), element("code", "", data.checkpoint.sha256));
       const samples = document.getElementById("samples");
       const nav = document.getElementById("sample-navigation");
+      stopPlayback();
+      players.length = 0;
       samples.replaceChildren();
       nav.replaceChildren();
       data.samples.forEach((sample, index) => {
@@ -350,6 +374,7 @@
         link.append(element("span", "nav-number", (index + 1).toString().padStart(2, "0")), document.createTextNode(sampleDisplayTitle(sample.title)));
         nav.append(link);
       });
+      window.RMFSRPlaybackMode.initialize(data, players, stopPlayback);
       status.hidden = true;
     } catch (error) {
       status.classList.add("error");

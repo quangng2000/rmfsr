@@ -8,7 +8,9 @@
     <meta name="theme-color" content="#101116">
     <title>RMFSR · Listening results</title>
     <link rel="stylesheet" href="styles.css?v=intro-removed-20261017">
-    <script src="app.js?v=snapshot-107713-20261018" defer></script>
+    <link rel="stylesheet" href="playback-mode.css?v=rms-matched-20261018">
+    <script src="playback-mode.js?v=rms-matched-20261018" defer></script>
+    <script src="app.js?v=rms-matched-107713-20261018" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#results">Skip to audio results</a>
@@ -27,6 +29,12 @@
             </div>
             <button class="stop-button" id="stop-all" type="button" disabled><span class="stop-symbol" aria-hidden="true"></span>Stop playback</button>
           </div>
+          <fieldset class="playback-mode" id="playback-mode" aria-describedby="playback-mode-note" disabled>
+            <legend>Playback level</legend>
+            <label><input type="radio" name="playback-mode" value="original" checked>Original relative levels</label>
+            <label><input type="radio" name="playback-mode" value="matched">RMS-matched to input</label>
+          </fieldset>
+          <p class="playback-mode-note" id="playback-mode-note">Original shared gain preserves relative loudness. RMS matching changes playback gain only, not the restoration.</p>
           <div class="legend-row">
             <div class="spectral-legend" aria-label="Spectrogram color scale">
               <span>Log magnitude</span>
@@ -45,7 +53,7 @@
         <section class="about-results" aria-labelledby="about-title">
           <h2 id="about-title">About this snapshot</h2>
           <div class="about-columns">
-            <p>All restored clips use the same checkpoint and the same starting noise within each example. Only NFE changes. Audio is presented at its saved relative level; individual outputs are not loudness-normalized.</p>
+            <p>All restored clips use the same checkpoint and starting noise within each example. Only NFE changes. Original relative levels are the default. Optional RMS matching matches each clip’s whole-recording RMS to its input, then applies one safety gain within the example. This changes playback loudness only, not model output or restoration quality.</p>
             <p>This is an independent, experimental implementation using offline WavJEPA conditioning. The eight source recordings come from the <a href="https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/">paper authors’ demo</a>. No clean references are available for these examples. More steps do not necessarily mean better speech.</p>
           </div>
           <details class="technical-details">

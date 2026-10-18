@@ -445,6 +445,8 @@ def spectrogram(wave: np.ndarray, destination: Path) -> None:
 
 
 def build(specs: list[dict]) -> dict:
+    from results_playback import add_rms_playback
+
     require([spec["index"] for spec in specs] == list(range(1, 9)), "Page must contain all eight inputs")
     sources, waves = {}, {}
     for spec in specs:
@@ -508,6 +510,7 @@ def build(specs: list[dict]) -> dict:
                 sample["references"].append(item)
         require([item["nfe"] for item in sample["outputs"]] == NFES, "Wrong output order")
         manifest["samples"].append(sample)
+    add_rms_playback(manifest, DOCS, RUN, spectrogram)
     write_json(DOCS / "results.json", manifest)
     return manifest
 
