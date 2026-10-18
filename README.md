@@ -24,7 +24,7 @@ This repository contains an **independent implementation attempt** and opt-in ex
 | Kernels | Encoder 3×3, decoder 3×2, TCN 1×11 | Matches stated kernels |
 | Flow path | Degraded mean; sigma .3 → 1e-8; compressed complex spectrum, exponent .3 | Matches stated formulation |
 | Training | Model-derived instantaneous JVP tangent; stop-gradient JVP; data-prediction loss | Independent equation implementation, analytically tested |
-| Time sampling | Logit-normal mean .4, SD 1; sigmoid diagonal ratio and cosine span schedule | Schedule endpoints/shapes inferred where unspecified |
+| Time sampling | Logit-normal mean .4, SD 1; active `figure1-cosine-approx` reproduces both plotted Figure 1 curves | Prose calls the diagonal curve sigmoid-based; formula unpublished. Epoch-to-update mapping remains an assumption |
 | Architecture size | **6,112,710 parameters**, measured **7.156 GMAC/audio-second/NFE** | Paper reports **7.8M / 1.22 GMAC/s**; substantial mismatch, not validated parity |
 | Context | 218 frames; **2.17 s past context** at 10 ms hop | Paper reports 2.13 s; exact dilations unspecified |
 | Spectrum | 16 kHz, 320-point FFT, sqrt-Hann, 20 ms window, 10 ms hop | Sample rate/hop/window details chosen for existing phone benchmark |
@@ -83,6 +83,33 @@ loss = mean((model(xt,y,t,r) - x_target)**2)
 The `t²` weighting implicit in this x-space loss is the data-prediction interpretation of IMF. At `r=t`, it reduces to predicting `x0 + sigma_min*e`. The off-diagonal sign and model-derived tangent have an analytic regression test.
 
 Paper Eq. 14 prints `U(0,t)^gamma` and then multiplies by `t` again. We interpret its span description using `r=t*U(0,1)^gamma`, making early samples concentrate near `r=t`. This is an explicit interpretation, not an exact transcription.
+
+The active `figure1-cosine-approx` schedule was checked against vector coordinates
+extracted from Figure 1 in [paper v1](https://arxiv.org/pdf/2605.16251v1).
+The plotted diagonal ratio decreases from 1 to .2 by half the displayed epoch
+range; gamma increases from .05 to 1 by .8 of that range. Both curves match the
+current cosine formulas: maximum absolute discrepancy is 0.0000775 for the
+diagonal ratio and 0.0001020 for gamma at the extracted vertices. Section 2.4
+calls the diagonal schedule "sigmoid-based" without specifying a logistic
+formula. A newly chosen logistic curve would therefore not establish greater
+fidelity to the published plot. We retain the plotted behavior and test it
+against independently extracted coordinates in
+`tests/fixtures/paper-figure1-schedule.json`. This does not recover the author's
+source code: mapping the epoch axis to fractional optimizer-update progress,
+and choosing a 300,000-update run, remain implementation assumptions. Historical
+`legacy` scheduling uses a different logistic approximation; it is retained
+only for existing configurations and is not the active full-run schedule.
+
+An explicitly queued `flow-schedule-transition.json` in a run directory can
+accelerate the flow curriculum at the next checkpointed session resume. The
+request is bound to the exact configuration digest. The clock starts at the
+checkpoint's existing progress, then smoothly reaches Figure 1 progress `.8`
+over 10,000 further optimizer updates: diagonal probability `.2`, span exponent
+`1`. This is an experimental training choice, not the author's published update
+schedule. The learning-rate clock and 300,000-update target remain unchanged.
+The resolved clock is stored in checkpoints and `flow-schedule-active.json`, and
+the pre-change checkpoint is retained. Subsequent resumes keep the original
+anchor; they do not restart the ramp. No live process reload or signal is used.
 
 No GAN, pretrained vocoder, latent autoencoder, or clean target is used at inference. Evaluation does not train on or use the missing clean samples.
 
@@ -156,4 +183,110 @@ EARS is **CC BY-NC 4.0**. Retain its attribution and license; these research che
 
 ## Cloud training preparation
 
-See [TRAINING.md](TRAINING.md) for the Figure 2 implementation audit, portable EARS/DNS/DAPS preparation, Runpod GPU comparison, benchmark scripts, and checkpoint recovery. `configs/runpod-estimate.json` contains the latest proposed effective-batch-16 training recipe; `configs/runpod.json` retains the earlier batch-4 recipe. Both use `figure2-v2` augmentations. The training and benchmark scripts now default to the batch-16 estimate configs. Validation restores fixed damaged-only inputs at 1/2/5 steps, selects `best-validation.pt` by five-step waveform MSE, and saves gap/intact-region metrics plus review audio. Existing pilot results remain labeled as the legacy synthetic-noise pilot.
+See [TRAINING.md](TRAINING.md) for the Figure 2 implementation audit, portable EARS/DNS/DAPS preparation, Runpod GPU comparison, benchmark scripts, and checkpoint recovery. `configs/runpod-estimate.json` contains the latest proposed effective-batch-16 training recipe; `configs/runpod.json` retains the earlier batch-4 recipe. Both use `figure2-v2` augmentations. The training script now defaults to `configs/efficient.json`; the benchmark defaults to `configs/efficient-benchmark.json` (100 updates, 30-minute training-process limit). Both use effective batch 16. Synthetic timing includes gradient accumulation, and both paths select the same configured model. Validation restores fixed damaged-only inputs at 1/2/5 steps, selects `best-validation.pt` by five-step waveform MSE, and saves gap/intact-region metrics plus review audio. Existing pilot results remain labeled as the legacy synthetic-noise pilot.
+
+## Optional paper-1 speech-fidelity loss
+
+`configs/balanced-paper1-fidelity.json` adds PESQ and negative SI-SDR supervision
+from [Yang et al., arXiv:2512.10382, section 3.4](https://arxiv.org/html/2512.10382v1#S3.SS4)
+to the existing MeanFlow objective. Install its optional dependencies with
+`pip install -e '.[fidelity]'`. The paper explicitly links the open-source
+[torch-pesq](https://github.com/audiolabs/torch-pesq) dependency; an official
+repository for the full paper implementation has not been confirmed.
+
+The adapted objective is `MeanFlow + 0.001 * PESQ + 0.0001 * negative_SI_SDR`.
+Those weights are the paper's plain data-prediction row of Table 2, used here
+as starting values. The PESQ library factor is explicitly 1.0; the paper does
+not specify that constructor setting. Our MeanFlow parameterization, spectral
+normalization and loss reduction differ, so these are not calibrated weights
+or an exact reproduction of its EDM-preconditioned NCSN++ model.
+
+Auxiliary losses use the **instantaneous `r=t` clean estimate**, decode it with
+the existing inverse compression, normalization and causal WOLA alignment, and
+compare its waveform to the clean training waveform. They do not treat an
+off-diagonal MeanFlow output as a clean endpoint or run a full inference rollout.
+Mixed/off-diagonal batches require one extra differentiable model call. CPU and
+CUDA are supported; MPS and clips shorter than 0.5 seconds are rejected.
+
+PESQ/negative-SI-SDR, their weighted contributions, base MeanFlow loss, RMS levels
+and silent-example exclusions are logged separately. Undefined silent references
+are excluded from both auxiliaries; silent predictions are excluded from PESQ's
+level normalization. The base coefficient loss still supervises these examples.
+Neither auxiliary is a direct absolute-loudness constraint. Their sum may be
+negative because negative SI-SDR is negative for good estimates; use fixed
+held-out restoration metrics and listening, not total training loss, for quality.
+
+Existing recipes remain disabled. Enabling this on a checkpoint requires
+`allow_speech_fidelity_on_resume: true`; the trainer preserves a pre-change
+checkpoint and records the transition. Subsequent resumes cannot silently alter
+the weights. The saved flow clock, optimizer, EMA, learning-rate clock and data
+recipe are preserved. This local candidate does not activate itself on a pod.
+No restoration-quality improvement has yet been demonstrated for this change.
+
+## Optional WavJEPA conditioning experiment
+
+The `wavjepa` option adds frozen, pretrained **damaged-audio** frame features
+to the efficient model's bottleneck. A LayerNorm/768-to-64 projection and
+residual 1x1 convolution combine them with the CNN's frequency/time features.
+The fusion convolution starts at zero, preserving the source checkpoint's
+predictions. The adapter and restoration network train; WavJEPA stays frozen.
+The MeanFlow/JVP objective, optional speech-fidelity losses and time sampler
+remain unchanged. Features are computed once per microbatch or evaluation
+clip and reused for every NFE. The encoder is outside the restoration EMA and
+checkpoint, identified by its pinned model revision.
+
+This is an **offline experiment**. The published encoder uses bidirectional
+attention in approximately 2-second segments. It does not preserve our causal
+streaming latency; streaming is explicitly rejected for this variant. Feature
+alignment uses the published frontend's actual convolution centers and segment
+length, including STFT padding/tail frames. Only the encoder copy is normalized;
+the damaged spectrum and clean targets retain their existing levels.
+
+Install `pip install -e '.[wavjepa,fidelity]'` in a separate environment. The
+first encoder load downloads the [authors' public checkpoint and custom code](https://huggingface.co/labhamlet/wavjepa-base)
+at immutable revision `6be4a5093f6c9adbbd55e00b6e5b8f067aa03345`. The bundle
+includes unused teacher/predictor modules; these are discarded after loading.
+
+Create a **new** experiment from a trusted checkpoint:
+
+```bash
+python -m rmfsr.wavjepa_fork --checkpoint runs/balanced-v1/latest.pt --run runs/wavjepa-v1
+```
+
+This preserves backbone/EMA weights, AdamW moments, RNG state, update count,
+data recipe, learning-rate clock and flow curriculum. Only the adapter starts
+fresh. Validation switches to offline inference and resets best-score selection;
+use matched offline inference for comparison with the original checkpoint.
+The old run is not modified. The command does not start training or touch a pod.
+After deciding to activate the new experiment, run:
+
+```bash
+python -m rmfsr.train --config runs/wavjepa-v1/config.json --run runs/wavjepa-v1 --resume runs/wavjepa-v1/latest.pt
+python -m rmfsr.wavjepa_restore --checkpoint runs/wavjepa-v1/latest.pt --input input.wav --output restored.wav --nfe 20
+```
+
+Inference expects mono 16 kHz audio and writes raw floating-point WAV without
+playback normalization. This integration is not evidence of better restoration;
+judge a trained candidate against the same held-out inputs and noise seeds.
+
+## Positional time conditioning and adaptive double normalization
+
+The opt-in `conditioning_architecture: "scm-positional-adn-v1"` uses the tested
+identity-time positional embeddings and frame-local adaptive double normalization.
+It replaces every conditioned convolution while preserving the full MeanFlow/JVP
+objective. This is an sCM-inspired adaptation to the speech CNN, not the complete
+sCM model or objective. Existing configurations keep their original conditioning.
+
+`rmfsr.conditioning_migration.convert_checkpoint(source, destination, request)`
+converts a trusted width-4 production checkpoint into a separate file. The request
+binds the exact source hash, configuration hash, and completed update count.
+Conversion retains learned raw/EMA weights, data fingerprints, RNG state, and
+learning-rate/flow clocks. It initializes the added scale projections, resets
+AdamW moments once, and resets best-validation selection. Subsequent resumes
+retain optimizer state and verify the saved architecture and migration metadata.
+The first update after conversion is checkpointed before the normal interval.
+
+The pre-step stability guard rejects nonfinite or excessive raw metrics before
+an optimizer update. The continuous controller does not automatically retry a
+failed trainer. Neither component stops or releases a GPU pod. Short stability
+tests do not establish long-run stability or improved restoration quality.

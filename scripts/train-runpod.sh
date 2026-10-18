@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-source /workspace/rmfsr-venv/bin/activate
-training_config="${1:-configs/runpod-estimate.json}"
-training_run="${2:-runs/estimate}"
+source "${RMFSR_VENV:-/opt/rmfsr-venv}/bin/activate"
+training_config="${1:-configs/efficient.json}"
+training_run="${2:-runs/efficient}"
 mkdir -p "$training_run"
 resume_args=()
 if [[ -f "$training_run/latest.pt" ]]; then

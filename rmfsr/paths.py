@@ -5,7 +5,12 @@ checkpoint writers should retain the resulting fingerprints instead of rescannin
 """
 import hashlib
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from itertools import islice
 from pathlib import Path
+import stat
 
 import numpy as np
 import soundfile as sf
@@ -23,19 +28,44 @@ def _valid_sha256(value):
     return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value.lower())
 
 
+def _ordered_map(function, values, workers=1):
+    """Overlap storage waits, preserving order and limiting in-flight work."""
+    if workers == 1:
+        yield from map(function, values)
+        return
+    values = iter(values)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        while chunk := list(islice(values, workers * 8)):
+            yield from executor.map(function, chunk)
+
+
 class FileVerifier:
     """Per-scan cache; stat changes invalidate it, and no disk cache is trusted."""
-    def __init__(self):
+    def __init__(self, workers=1, progress=None):
+        if not isinstance(workers, int) or not 1 <= workers <= 32:
+            raise ValueError('Verification workers must be an integer between 1 and 32')
+        self.workers = workers
+        self.progress = progress
         self._digests = {}
         self._audio_info = {}
 
     @staticmethod
     def _identity(path):
-        path = Path(path).resolve()
-        stat = path.stat()
-        if not path.is_file():
+        path = Path(path)
+        identity = path.stat()
+        if not stat.S_ISREG(identity.st_mode):
             raise ValueError(f'Not a regular file: {path}')
-        return (str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        return (str(path), identity.st_dev, identity.st_ino, identity.st_size,
+                identity.st_mtime_ns, identity.st_ctime_ns)
+
+    def audio_rows(self, rows, *, sample_rate=None, require_hashes=False, label='audio'):
+        function = partial(self.audio, sample_rate=sample_rate, require_hashes=require_hashes)
+        if self.progress:
+            self.progress(label, 0, len(rows))
+        for index, result in enumerate(_ordered_map(function, rows, self.workers), 1):
+            if self.progress and (index % 1000 == 0 or index == len(rows)):
+                self.progress(label, index, len(rows))
+            yield result
 
     def digest(self, path):
         path = Path(path).resolve()
@@ -83,26 +113,43 @@ class FileVerifier:
         return {'audio_sha256': actual, 'sr': rate, 'frames': frames}
 
 
-def load_manifest(path):
+def load_manifest(path, *, workers=1, resolve_paths=True):
     path = Path(path).resolve()
     rows = json.loads(path.read_text())
     if not isinstance(rows, list) or any(not isinstance(row, dict) or 'path' not in row for row in rows):
         raise ValueError(f'Invalid manifest: {path}')
-    for row in rows:
+    def resolve_row(row):
         audio = Path(row['path'])
-        row['path'] = str((audio if audio.is_absolute() else path.parent / audio).resolve())
-    return rows
+        audio = audio if audio.is_absolute() else path.parent / audio
+        row['path'] = str(audio.resolve()) if resolve_paths else os.path.abspath(audio)
+        return row
+    return list(_ordered_map(resolve_row, rows, workers))
+
+
+def indexed_noise_paths(completion, directory):
+    """Use saved conversion indexes without walking or opening corpus audio."""
+    completion = Path(completion)
+    inventory = json.loads(completion.read_text())
+    root = Path(directory).resolve()
+    paths = []
+    for shard in inventory['shards']:
+        for row in load_manifest(completion.parent / (shard + '.json'), resolve_paths=False):
+            path = Path(row['path'])
+            if path.is_relative_to(root) and path.suffix.lower() in _AUDIO_SUFFIXES:
+                paths.append(path)
+    return sorted(paths)
 
 
 def verify_manifest(path, *, require_hashes=False, sample_rate=None, verifier=None):
     """Verify stored hashes/header metadata; legacy rows use actual byte hashes."""
     verifier = verifier or FileVerifier()
-    rows = load_manifest(path)
+    rows = load_manifest(path, workers=verifier.workers)
     if not rows:
         raise ValueError(f'Empty manifest: {path}')
     payload, content_hashes, duration = [], [], 0.0
-    for row in rows:
-        actual = verifier.audio(row, sample_rate=sample_rate, require_hashes=require_hashes)
+    actuals = verifier.audio_rows(rows, sample_rate=sample_rate,
+                                 require_hashes=require_hashes, label=str(path))
+    for row, actual in zip(rows, actuals):
         payload.append({**{key: row[key] for key in _METADATA_KEYS if key in row}, **actual})
         content_hashes.append(actual['audio_sha256'])
         duration += actual['frames'] / actual['sr']
@@ -123,7 +170,8 @@ def noise_partition_fingerprints(train_dir, validation_dir, *, sample_rate=16000
                                  verifier=None, provenance_rows=None, require_hashes=False):
     """Fingerprint exactly the selected noise files; reject cross-split content."""
     verifier = verifier or FileVerifier()
-    provenance = {str(Path(row['path']).resolve()): row for row in provenance_rows or []}
+    provenance = dict(_ordered_map(lambda row: (str(Path(row['path']).resolve()), row),
+                                  provenance_rows or [], verifier.workers))
     if len(provenance) != len(provenance_rows or []):
         raise ValueError('Duplicate noise provenance paths')
     result, contents = {}, []
@@ -133,14 +181,17 @@ def noise_partition_fingerprints(train_dir, validation_dir, *, sample_rate=16000
         if not root.is_dir() or not paths:
             raise ValueError(f'DNS noise not prepared: {label}: {directory}')
         payload, hashes = [], set()
-        for path in paths:
+        def selected_row(path):
             recorded = provenance.get(str(path.resolve()))
             if provenance_rows is not None and recorded is None:
                 raise ValueError(f'Selected noise missing from verified provenance: {path}')
             if recorded is not None and recorded.get('split') != label:
                 raise ValueError(f'Selected noise partition mismatch: {path}: expected {label}')
-            actual = verifier.audio(recorded or {'path': path}, sample_rate=sample_rate,
-                                    require_hashes=require_hashes)
+            return recorded or {'path': path}
+        selected = list(_ordered_map(selected_row, paths, verifier.workers))
+        actuals = verifier.audio_rows(selected, sample_rate=sample_rate,
+                                     require_hashes=require_hashes, label='noise_' + label)
+        for path, actual in zip(paths, actuals):
             payload.append({'path': path.relative_to(root).as_posix(), **actual})
             hashes.add(actual['audio_sha256'])
         if any(hashes & other for other in contents):

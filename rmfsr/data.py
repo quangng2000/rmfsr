@@ -5,7 +5,7 @@ import soundfile as sf
 import torch
 from scipy import signal
 from .degradations import image_rir,level,rms,corrupt,target_process,spectral_augment
-from .paths import load_manifest
+from .paths import load_manifest,indexed_noise_paths
 
 def read_audio(path,sr):
     wave,rate=sf.read(path,dtype='float32',always_2d=True);wave=wave.mean(1)
@@ -14,14 +14,19 @@ def read_audio(path,sr):
     return wave
 
 class SpeechPairs:
-    def __init__(self,manifest,seconds=4,sr=16000,seed=42,noise_dir=None,ltas_path=None,ffmpeg=None,pilot=False,augmentation_profile='legacy'):
-        self.rows=load_manifest(manifest);self.n=round(seconds*sr);self.sr=sr
+    def __init__(self,manifest,seconds=4,sr=16000,seed=42,noise_dir=None,ltas_path=None,ffmpeg=None,pilot=False,augmentation_profile='legacy',resolve_manifest_paths=True,noise_completion=None):
+        self.rows=load_manifest(manifest,resolve_paths=resolve_manifest_paths);self.n=round(seconds*sr);self.sr=sr
         self.rng=np.random.default_rng(seed);self.ffmpeg=ffmpeg;self.pilot=pilot
-        if augmentation_profile not in ('legacy','figure2-v2'):raise ValueError('Unknown augmentation profile')
-        self.figure2=augmentation_profile=='figure2-v2'
+        if augmentation_profile not in ('legacy','figure2-v2','figure2-v3-aligned','demo-eight-v1'):raise ValueError('Unknown augmentation profile')
+        self.augmentation_profile=augmentation_profile
+        self.figure2=augmentation_profile in ('figure2-v2','figure2-v3-aligned')
+        self.align_fir=augmentation_profile=='figure2-v3-aligned'
         self.files=[r['path'] for r in self.rows if r['frames']>=self.n]
         if not self.files:raise ValueError('No audio long enough for training crop')
-        self.noise=sorted(p for p in pathlib.Path(noise_dir).rglob('*') if p.suffix.lower() in ('.wav','.flac')) if noise_dir else []
+        if noise_completion and noise_dir:
+            self.noise=indexed_noise_paths(noise_completion,noise_dir)
+        else:
+            self.noise=sorted(p for p in pathlib.Path(noise_dir).rglob('*') if p.suffix.lower() in ('.wav','.flac')) if noise_dir else []
         self.ltas=np.load(ltas_path) if ltas_path else None
         if not pilot and (not self.noise or self.ltas is None or not ffmpeg):
             raise ValueError('Full data mode requires DNS noise, DAPS LTAS, and ffmpeg; no silent substitutes')
@@ -39,6 +44,14 @@ class SpeechPairs:
         start=int(self.rng.integers(len(x)-self.n+1));return x[start:start+self.n].copy()
     def one(self):
         rng=self.rng
+        if self.augmentation_profile == 'demo-eight-v1':
+            from .demo_augment import apply_treatment
+            # Same source corpus and studio target processing, one speech source
+            # per pair as in the approved listening previews.
+            target=target_process(self.segment(rng.choice(self.files)),self.sr,self.ltas)
+            noise=self.segment(rng.choice(self.noise)) if self.noise else rng.normal(size=self.n)
+            damaged,self.last_augmentation=apply_treatment(target,noise,rng,self.sr,self.ffmpeg)
+            return target,damaged,np.zeros(self.n,bool),[self.last_augmentation['family']]
         room=rng.uniform([3,3,2.4],[9,8,4]);mic=rng.uniform(.2,room-.2)
         reflection=rng.uniform(.3,.85) if self.figure2 else None
         dry=np.zeros(self.n,np.float32);wet=np.zeros_like(dry)
@@ -57,7 +70,7 @@ class SpeechPairs:
         if self.figure2:noise=spectral_augment(noise,rng,self.sr)
         snr=rng.normal(5,10);wet+=noise*(rms(wet)/(max(rms(noise),1e-6)*10**(snr/20)))
         wet=level(wet,rng.normal(-40,10))
-        damaged,mask,kinds=corrupt(wet,rng,self.sr,self.ffmpeg,codec_enabled=bool(self.ffmpeg),extra_quantization=self.figure2)
+        damaged,mask,kinds=corrupt(wet,rng,self.sr,self.ffmpeg,codec_enabled=bool(self.ffmpeg),extra_quantization=self.figure2,align_fir=self.align_fir)
         target=target_process(dry,self.sr,self.ltas)
         return target,damaged,mask,kinds
     def batch(self,size):

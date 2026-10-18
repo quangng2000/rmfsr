@@ -1,4 +1,6 @@
 import copy
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 import torch
@@ -41,6 +43,16 @@ class EstimateTests(unittest.TestCase):
         t,r=sample_times(10000,.9,'cpu',name)
         self.assertTrue(((r>=0)&(r<=t)).all())
         self.assertLess(abs((r==t).float().mean().item()-.2),.02)
+
+    def test_schedule_matches_published_figure_vertices(self):
+        # Reference coordinates come from the paper PDF, not schedule_values.
+        fixture = json.loads((Path(__file__).parent / 'fixtures' /
+                              'paper-figure1-schedule.json').read_text())
+        for key, index in [('diagonal', 0), ('gamma', 1)]:
+            for progress, expected in fixture[key]:
+                with self.subTest(curve=key, progress=progress):
+                    actual = schedule_values(progress, 'figure1-cosine-approx')[index]
+                    self.assertLessEqual(abs(actual - expected), fixture['absolute_tolerance'])
 
 if __name__=='__main__':
     unittest.main()

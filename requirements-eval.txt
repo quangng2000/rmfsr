@@ -1,0 +1,6 @@
+# Optional, separate from the training environment.
+distillmos==0.9.1
+torchaudio==2.8.0
+onnxruntime==1.31.0
+openai-whisper==20250625
+jiwer==4.0.0

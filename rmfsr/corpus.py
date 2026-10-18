@@ -43,6 +43,9 @@ def convert_tar(archive, directory, source, kind, archive_digest):
         for member in handle:
             if not member.isfile() or not member.name.lower().endswith('.wav'):
                 continue
+            # macOS resource-fork sidecars can end in .wav but contain metadata.
+            if Path(member.name).name.startswith('._') or '__MACOSX' in Path(member.name).parts:
+                continue
             if kind == 'daps' and 'produced' not in Path(member.name).parts:
                 continue
             if shutil.disk_usage(directory).free < 8 * 1024**3:
@@ -56,7 +59,10 @@ def convert_tar(archive, directory, source, kind, archive_digest):
             dest = directory / split / f'{key}.flac'
             dest.parent.mkdir(parents=True, exist_ok=True)
             raw = handle.extractfile(member).read()
-            wave, sr = sf.read(io.BytesIO(raw), dtype='float32', always_2d=True)
+            try:
+                wave, sr = sf.read(io.BytesIO(raw), dtype='float32', always_2d=True)
+            except (RuntimeError, ValueError) as exc:
+                raise ValueError(f'Cannot decode archive audio member {member.name!r}: {exc}') from exc
             wave = wave.mean(1)
             common = math.gcd(sr, 16000)
             if sr != 16000:

@@ -21,6 +21,11 @@ def profile(device='auto',batch=1,seconds=4,repeat=5,bottleneck_attention=False,
 
     Use model_inventory (or --inventory-only) for forward-only operation counts.
     """
+    accumulation = (config or {}).get('accumulation_steps', 1)
+    if isinstance(accumulation, bool) or not isinstance(accumulation, int) or accumulation < 1:
+        raise ValueError('accumulation_steps must be a positive integer')
+    if repeat < 1 or batch < 1:
+        raise ValueError('repeat and batch must be positive')
     frames = round(seconds * 100)
     if frames < 1:
         raise ValueError('seconds must cover at least one 10 ms frame')
@@ -33,8 +38,10 @@ def profile(device='auto',batch=1,seconds=4,repeat=5,bottleneck_attention=False,
     for i in range(repeat+1):
         start=time.perf_counter();optimizer.zero_grad(set_to_none=True)
         # Always include the expensive off-diagonal JVP case.
-        loss,_=meanflow_loss(model,x,y,t=x.new_full((batch,),.6),r=x.new_full((batch,),.2))
-        loss.backward();optimizer.step()
+        for _ in range(accumulation):
+            loss,_=meanflow_loss(model,x,y,t=x.new_full((batch,),.6),r=x.new_full((batch,),.2))
+            (loss / accumulation).backward()
+        optimizer.step()
         if device.type=='mps':torch.mps.synchronize()
         elif device.type=='cuda':torch.cuda.synchronize()
         if i:durations.append(time.perf_counter()-start)
@@ -43,10 +50,13 @@ def profile(device='auto',batch=1,seconds=4,repeat=5,bottleneck_attention=False,
                 torch_version=torch.__version__,precision='float32',
                 peak_allocated_gib=torch.cuda.max_memory_allocated()/1024**3 if device.type=='cuda' else None,
                 peak_reserved_gib=torch.cuda.max_memory_reserved()/1024**3 if device.type=='cuda' else None,
-                batch=batch,seconds=audio_seconds,requested_seconds=seconds,frames=frames,
+                batch=batch,accumulation_steps=accumulation,effective_batch_size=batch*accumulation,
+                seconds=audio_seconds,requested_seconds=seconds,frames=frames,
                 parameters=sum(p.numel() for p in model.parameters()),
                 training_step_seconds=durations,median_seconds=statistics.median(durations),
+                optimizer_updates_per_second=1/statistics.median(durations),
                 estimated_300k_step_days=statistics.median(durations)*300000/86400,
+                timing_note='Complete synthetic optimizer updates including accumulation; excludes data loading, augmentation, EMA, validation and checkpointing.',
                 gmac_per_audio_second_per_evaluation=inventory['gmac_per_audio_second_per_evaluation'],
                 architecture=model.architecture(),
                 mac_note='Conv, Linear, attention matmuls; excludes elementwise ops, STFT, and augmentation')
@@ -106,14 +116,16 @@ def model_inventory(model, seconds=4):
                 note='Conv, Linear, attention matmuls only; excludes nonlinear ops, norms, memory traffic and STFT. No runtime measurement.')
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--device',default='auto');p.add_argument('--batch',type=int,default=1)
+    p=argparse.ArgumentParser();p.add_argument('--device',default='auto');p.add_argument('--batch',type=int)
     p.add_argument('--config',help='JSON config selecting the model architecture')
-    p.add_argument('--decoder-before-upsample',action='store_true');p.add_argument('--bottleneck-attention',action='store_true');p.add_argument('--inventory-only',action='store_true',help='Count forward operations without optimizer updates');p.add_argument('--seconds',type=float,default=4);p.add_argument('--repeat',type=int,default=5);p.add_argument('--output',required=True)
+    p.add_argument('--decoder-before-upsample',action='store_true');p.add_argument('--bottleneck-attention',action='store_true');p.add_argument('--inventory-only',action='store_true',help='Count forward operations without optimizer updates');p.add_argument('--seconds',type=float);p.add_argument('--repeat',type=int,default=5);p.add_argument('--output',required=True)
     a=p.parse_args()
     if a.config and (a.decoder_before_upsample or a.bottleneck_attention):
         p.error('--config cannot be combined with --decoder-before-upsample or --bottleneck-attention')
     from pathlib import Path
     config=json.loads(Path(a.config).read_text()) if a.config else None
+    a.batch = a.batch if a.batch is not None else (config or {}).get('batch_size', 1)
+    a.seconds = a.seconds if a.seconds is not None else (config or {}).get('seconds', 4)
     if a.inventory_only:
         torch.set_num_threads(8)
         model=_profile_model(config,a.bottleneck_attention,a.decoder_before_upsample).to(device_for(a.device))

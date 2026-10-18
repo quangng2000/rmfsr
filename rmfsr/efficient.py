@@ -105,7 +105,8 @@ class FoldedTemporalBottleneck(nn.Module):
 class EfficientRMFSR(RMFSR):
     def __init__(self, groups=16, attention_rank=16, folded_width=448,
                  channels=(64, 64, 128, 256, 256),
-                 encoder_dilations=(1, 2, 4, 8, 16), tcn_dilations=(1, 2, 4, 8)):
+                 encoder_dilations=(1, 2, 4, 8, 16), tcn_dilations=(1, 2, 4, 8),
+                 wavjepa=None):
         validate_options(channels, groups, attention_rank, folded_width,
                          encoder_dilations, tcn_dilations)
         super().__init__(channels=channels, encoder_dilations=encoder_dilations,
@@ -131,15 +132,30 @@ class EfficientRMFSR(RMFSR):
         # Learn frequency-specific corrections AFTER final nearest upsampling.
         self.refine = ConditionedConv(cin, cin, (3, 1), groups=cin)
         self.refine_activation = SnakeBeta(cin)
+        self.wavjepa = wavjepa
+        self.conditioning = None
+        if wavjepa is not None:
+            from .wavjepa import BottleneckConditioning
+            self.conditioning = BottleneckConditioning(self.channels[-1], wavjepa['adapter_channels'])
 
     def architecture(self):
-        return dict(super().architecture(), model_type='efficient-v1', groups=self.groups,
+        architecture = dict(super().architecture(), model_type='efficient-v1', groups=self.groups,
                     attention_rank=self.attention_rank, folded_width=self.folded_width,
                     frequency_bins=161, final_depthwise_frequency_refinement=True)
+        if self.wavjepa is not None:
+            architecture.update(wavjepa=dict(self.wavjepa), conditioning_is_causal=False)
+        return architecture
 
-    def forward(self, x, y, t, r, cache=None):
+    def forward(self, x, y, t, r, cache=None, conditioning=None):
         if x.ndim != 4 or x.shape[1:3] != (2, 161) or y.shape != x.shape:
             raise ValueError('Expected equal complex spectra (B, 2, 161, T)')
+        if self.conditioning is not None:
+            if cache is not None:
+                raise ValueError('WavJEPA conditioning is offline; streaming caches are unsupported')
+            if conditioning is None:
+                raise ValueError('WavJEPA model requires features from the damaged waveform')
+        elif conditioning is not None:
+            raise ValueError('This model has no WavJEPA conditioning adapter')
         emb = self.embedding(t, r)
         h = self.stem(torch.cat((x, y), 1), emb, cache)
         skips, sizes = [], []
@@ -147,6 +163,8 @@ class EfficientRMFSR(RMFSR):
             sizes.append(h.shape[2])
             h = attention(block(h, emb, cache), emb, cache)
             skips.append(h)
+        if self.conditioning is not None:
+            h = self.conditioning(h, conditioning)
         if self.folded is not None:
             h = self.folded(h, emb, cache)
         else:

@@ -57,7 +57,7 @@ def _masked_mse(total, count):
 
 
 @torch.no_grad()
-def validate_restoration(ema, validation, spectral, cfg, device, output_dir=None, save_audio=False):
+def validate_restoration(ema, validation, spectral, cfg, device, output_dir=None, save_audio=False, conditioner=None):
     """Return flat training metrics; optionally save a review report and audio.
 
     Every call regenerates the same held-out pairs with an isolated NumPy RNG.
@@ -72,6 +72,8 @@ def validate_restoration(ema, validation, spectral, cfg, device, output_dir=None
                                     'validation_audio_examples', allow_zero=True)
     chunk_frames = _positive_integer(cfg.get('validation_chunk_frames', 10),
                                      'validation_chunk_frames', allow_zero=True) or None
+    if cfg.get('wavjepa') is not None and (conditioner is None or chunk_frames is not None):
+        raise ValueError('WavJEPA validation requires its frozen encoder and validation_chunk_frames=0')
     nfes = cfg.get('inference_evaluations_to_compare', [1, 2, 5])
     if not isinstance(nfes, (list, tuple)) or not nfes:
         raise ValueError('inference_evaluations_to_compare must be a nonempty list')
@@ -120,12 +122,16 @@ def validate_restoration(ema, validation, spectral, cfg, device, output_dir=None
             y = spectral.encode(torch.from_numpy(damaged)).to(device)
             if x.shape != y.shape or not torch.isfinite(x).all() or not torch.isfinite(y).all():
                 raise FloatingPointError('Invalid encoded validation spectra')
+            condition_kwargs = {}
+            if conditioner is not None:
+                # Extract once from damaged audio; reuse for DP and every NFE.
+                condition_kwargs['conditioning'] = conditioner(torch.from_numpy(damaged)[None], spectral, y.shape[-1])
             t = x.new_full((1,), .5)
             diagnostic_noise = torch.randn(x.shape, generator=diagnostic_rng, dtype=x.dtype)
             if cfg.get('validation_pink_noise', False):
                 weights = torch.arange(x.shape[2], dtype=x.dtype).clamp_min(1).rsqrt()[None, None, :, None]
                 diagnostic_noise *= weights / weights.square().mean().sqrt()
-            prediction = ema(.5 * x + .5 * y + .15 * diagnostic_noise.to(device), y, t, t)
+            prediction = ema(.5 * x + .5 * y + .15 * diagnostic_noise.to(device), y, t, t, **condition_kwargs)
             if prediction.shape != x.shape or not torch.isfinite(prediction).all():
                 raise FloatingPointError('Invalid diagonal validation prediction')
             diagnostic_errors = [(prediction - x).square().mean().item(), (y - x).square().mean().item()]
@@ -139,7 +145,7 @@ def validate_restoration(ema, validation, spectral, cfg, device, output_dir=None
             item = dict(index=index, samples=len(clean), gap_samples=int(missing.sum()),
                         degradations=list(kinds), restoration={})
             for nfe in nfes:
-                restored_spectrum = sample(ema, y, steps=nfe, noise=noise, chunk_frames=chunk_frames)
+                restored_spectrum = sample(ema, y, steps=nfe, noise=noise, chunk_frames=chunk_frames, **condition_kwargs)
                 if restored_spectrum.shape != y.shape or not torch.isfinite(restored_spectrum).all():
                     raise FloatingPointError(f'Invalid restoration spectrum at NFE {nfe}')
                 decoded = spectral.decode(restored_spectrum, len(clean))

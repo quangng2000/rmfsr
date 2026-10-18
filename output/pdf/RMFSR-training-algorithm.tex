@@ -1,0 +1,267 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=0.78in,headheight=15pt,headsep=16pt,footskip=26pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,xcolor,enumitem,fancyhdr,microtype}
+\usepackage[colorlinks=true,urlcolor=blue!55!black,linkcolor=blue!55!black]{hyperref}
+\definecolor{accent}{HTML}{125B70}
+\definecolor{ink}{HTML}{18323F}
+\definecolor{muted}{HTML}{526672}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}RMFSR / TRAINING ALGORITHM}
+\fancyhead[R]{\small\sffamily\color{muted}Implementation snapshot}
+\fancyfoot[L]{\small\sffamily\color{muted}15 October 2026}
+\fancyfoot[R]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\setlength{\parindent}{0pt}\setlength{\parskip}{6pt}
+\linespread{1.08}
+\setlist[itemize]{leftmargin=1.35em,itemsep=3pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=1.6em,itemsep=4pt,topsep=3pt}
+\newcommand{\heading}[2]{\vspace{5pt}{\Large\sffamily\bfseries\color{accent}#1\quad #2}\par\vspace{4pt}}
+\newcommand{\subheading}[1]{{\sffamily\bfseries\color{ink}#1}\par}
+\newcommand{\E}{\mathcal E}\newcommand{\D}{\mathcal D}
+\newcommand{\sg}{\operatorname{sg}}
+\newcommand{\MF}{\mathcal L_{\mathrm{MF}}}
+\newcommand{\PESQ}{\mathcal L_{\mathrm{PESQ}}}
+\newcommand{\SDR}{\mathcal L_{\mathrm{SI\text{-}SDR}}}
+\newcommand{\total}{\mathcal L_{\mathrm{total}}}
+\newcommand{\note}[1]{\par\smallskip{\color{accent}\vrule width 2pt}\hspace{7pt}\begin{minipage}{0.94\linewidth}\small #1\end{minipage}\par\smallskip}
+\begin{document}
+\thispagestyle{plain}
+{\sffamily\bfseries\fontsize{28}{32}\selectfont\color{ink}RMFSR training algorithm}\par
+{\sffamily\color{muted}Readable mathematical guide / current implementation}\par
+
+This is a typeset version of our implementation notes, checked on 15 October 2026 at update \textbf{67,297} of \texttt{balanced-v1}. The active data recipe is \texttt{figure2-v3-aligned}, with the restored gradual flow schedule and enabled PESQ/SI-SDR waveform losses.
+
+It documents our implementation of the RMFSR method, including our additional losses and reproduction choices. It is not the authors' original training code.
+
+\subheading{Symbols used throughout}
+\begin{itemize}
+\item $s$: clean target waveform after direct-path mixing and studio processing.
+\item $d$: corresponding degraded waveform containing the same underlying speech.
+\item $c=\E(s)$ and $y=\E(d)$: compressed complex STFT coefficients, stored as real and imaginary channels.
+\item $x_t$: intermediate training state; $t$ is current flow time, and $r\leq t$ is destination time.
+\item $F_\theta(x_t,y,t,r)$: CNN prediction in compressed coefficient units.
+\item $\D$: inverse compression and waveform reconstruction.
+\item $\sg$: stop-gradient; its argument is constant during parameter backpropagation.
+\end{itemize}
+\note{\textbf{Flow time runs from degraded/noisy at $t=1$ toward clean at $t=0$.} It is separate from audio time and the optimizer-update counter.}
+
+\heading{1}{Generate a paired training example}
+Sample one or two EARS speech segments $s_j$, a shared room and microphone, and separate source positions. Generate full room impulse responses $h_j$ and direct-path counterparts $h_j^{\mathrm{dir}}$. Use the same mixing gains $a_j$ on both branches:
+\[
+ s_{\mathrm{dir}}=\sum_{j=1}^{J}a_j(s_j*h_j^{\mathrm{dir}}),\qquad
+ s_{\mathrm{wet}}=\sum_{j=1}^{J}a_j\operatorname{EQ}_j(s_j*h_j).
+\]
+\begin{align*}
+ s&=\operatorname{Studio}(s_{\mathrm{dir}}),\\
+ d&=\operatorname{Corrupt}\!\left(\operatorname{Level}
+       (s_{\mathrm{wet}}+\beta\operatorname{EQ}_n(n),\ell)\right).
+\end{align*}
+Here $n$ is DNS background noise, and $\beta$ sets the sampled SNR. The code draws independent $z_1,z_2\sim\mathcal N(0,1)$:
+\[
+ \mathrm{SNR}=5+10z_1\ \mathrm{dB},\qquad \ell=-40+10z_2\ \mathrm{dBFS}.
+\]
+\textbf{Studio processing:} DAPS-reference spectral EQ, mild compression, and a final target level of $-25$ dBFS. Degradations and reproduction choices continue on the next page.
+
+\newpage
+\subheading{Data generation: effects and implementation choices}
+\texttt{Corrupt} samples bandwidth limitation, notch filtering, nonlinear distortion, modulation, phase distortion, spectral masking or suppression, MP3/GSM coding, quantization, and 10--80 ms dropouts.
+
+Our choices include a 20\% chance of a second source segment, order-2 image-source RIRs, a static soft-knee compressor, and effect probabilities not specified in the paper. Independently sampled segments need not have different speakers. The final damaged level can differ from $\ell$ because effects follow level normalization.
+
+\heading{2}{Convert waveforms to coefficients}
+Use 16 kHz audio, a 320-sample square-root Hann window, and a 160-sample hop: \textbf{20 ms frames, 10 ms hop, 161 frequency bins}.
+
+For a frame's Fourier coefficient $Z$, normalize and compress:
+\[
+ \widetilde Z=\frac{Z}{\sum_n w[n]},\qquad
+ \E:\ \widetilde Z\mapsto |\widetilde Z|^{0.3}e^{i\arg\widetilde Z}.
+\]
+Magnitudes are floored near zero for numerical stability. The CNN sees $[B,2,161,T]$ tensors; the two channels hold real and imaginary parts. Decoding reverses compression and scale, then uses inverse FFT and weighted overlap-add.
+
+\heading{3}{Sample flow times and build the state}
+At zero-based optimizer update $k$, let $g=k/300000$. Independently for each example, draw
+\[
+ t=\max\!\left(10^{-4},\operatorname{sigmoid}(z+0.4)\right),\qquad z\sim\mathcal N(0,1),
+\]
+\[
+ r=\begin{cases}
+ t,&\text{with probability }q(g),\\
+ tU^{\gamma(g)},&\text{otherwise, with }U\sim\mathcal U(0,1).
+ \end{cases}
+\]
+The current gradual schedules are
+\begin{align*}
+ q(g)&=0.2+0.4\left[1+\cos\!\left(\pi\min\!\left(\frac{g}{0.5},1\right)\right)\right],\\
+ \gamma(g)&=0.05+0.475\left[1-\cos\!\left(\pi\min\!\left(\frac{g}{0.8},1\right)\right)\right].
+\end{align*}
+These approximate the paper's Figure 1 curves. Mapping its epoch axis onto 300,000 updates is our choice; the previously accelerated schedule is no longer active.
+
+Draw pink coefficient noise $\epsilon$: independent Gaussian real/imaginary entries with standard deviation proportional to $1/\sqrt{\max(f,1)}$, normalized to unit mean variance across frequency bins. Set $\sigma_{\min}=10^{-8}$ and $\sigma_{\max}=0.3$:
+\[
+ \boxed{x_t=(1-t)c+ty+\big[(1-t)\sigma_{\min}+t\sigma_{\max}\big]\epsilon.}
+\]
+The conditional path velocity is
+\[
+ v_{\mathrm{cond}}=y-c+(\sigma_{\max}-\sigma_{\min})\epsilon.
+\]
+The clean signal constructs this training state and its supervision. Inference needs only the degraded signal and sampled noise.
+
+\newpage
+\heading{4}{Compute the MeanFlow target and loss}
+\subheading{A. Convert the CNN prediction into a flow}
+The CNN predicts coefficients. The data-parameterized flow is
+\[
+ u_\theta(z,y,t,r)=\frac{z-F_\theta(z,y,t,r)}{t}.
+\]
+
+\subheading{B. Obtain the instantaneous tangent}
+Use a diagonal query, where destination time equals current time, and detach it:
+\[
+ v_{\mathrm{diag}}=\sg\!\left[\frac{x_t-F_\theta(x_t,y,t,t)}{t}\right].
+\]
+
+\subheading{C. Compute the directional derivative}
+Evaluate the Jacobian-vector product at the sampled $(x_t,t,r)$:
+\[
+ J_\theta=D_z u_\theta(x_t,y,t,r)[v_{\mathrm{diag}}]
+            +\partial_tu_\theta(x_t,y,t,r).
+\]
+Equivalently, code differentiates with respect to $(z,r,t)$ in direction $(v_{\mathrm{diag}},0,1)$. The degraded condition $y$ and destination $r$ are held fixed.
+\note{\textbf{The tangent comes from $r=t$. The differentiated flow is evaluated at the sampled $r,t$.} These are two distinct network conditions.}
+
+\subheading{D. Construct a stopped coefficient target}
+\begin{align*}
+ c_\star
+ &=\sg\!\left[x_t-tv_{\mathrm{cond}}+t(t-r)J_\theta\right]\\[3pt]
+ &=\sg\!\left[c+\sigma_{\min}\epsilon+t(t-r)J_\theta\right].
+\end{align*}
+
+\subheading{E. Minimize the coefficient error}
+\[
+ \boxed{\MF=\operatorname{mean}\!\left[
+       \big(F_\theta(x_t,y,t,r)-c_\star\big)^2\right].}
+\]
+The mean includes batch, real/imaginary channels, frequencies, and frames. Algebraically, this coefficient MSE equals the mean squared velocity residual weighted by $t^2$. Replacing it with unweighted velocity MSE changes the objective.
+
+\subheading{What a small loss means}
+\begin{itemize}
+\item \textbf{When $r=t$:} the correction vanishes, and $c_\star=c+10^{-8}\epsilon\approx c$. If the entire microbatch is diagonal, the code skips the unnecessary JVP.
+\item \textbf{When $r<t$:} the target includes the stopped JVP correction. A small main loss is not directly a measurement of final restored-audio error.
+\end{itemize}
+
+\newpage
+\heading{5}{Add the enabled waveform losses}
+The additional supervision uses the instantaneous clean estimate:
+\[
+ \widehat c_{\mathrm{diag}}=F_\theta(x_t,y,t,t),\qquad
+ \widehat s_{\mathrm{diag}}=\D(\widehat c_{\mathrm{diag}}).
+\]
+This forward pass and decoder retain gradients. It is distinct from the detached diagonal query used for the JVP tangent.
+
+\subheading{Current total objective}
+\[
+ \boxed{\begin{aligned}
+ \total={}&\MF\\
+ &+10^{-3}\PESQ(s,\widehat s_{\mathrm{diag}})\\
+ &+10^{-4}\SDR(\widehat s_{\mathrm{diag}},s).
+ \end{aligned}}
+\]
+
+\subheading{PESQ term}
+$\PESQ$ is the differentiable \texttt{torch\_pesq.PesqLoss} implementation with internal factor 1.0. It is a training loss, not a reported PESQ score.
+
+\subheading{SI-SDR term}
+The term is \textbf{negative} SI-SDR, averaged over eligible utterances. Writing $\widehat s=\widehat s_{\mathrm{diag}}$:
+\begin{align*}
+ \alpha&=\frac{\langle\widehat s,s\rangle}{\max(\|s\|^2,10^{-12})},\\
+ \delta&=10^{-8}\max(\|s\|^2,10^{-12}),\\[4pt]
+ \SDR&=-10\log_{10}\frac{\|\alpha s\|^2+\delta}
+                            {\|\widehat s-\alpha s\|^2+\delta}.
+\end{align*}
+The code does not subtract waveform means. References with mean-square energy at or below $10^{-12}$ are excluded from both auxiliary terms. PESQ also excludes predictions below that threshold. Exclusions are logged; an empty eligible set contributes zero for that term.
+
+\note{\textbf{We do not run the multi-step inference solver and backpropagate its final output during training.} These waveform terms supervise a diagonal prediction from the sampled training state.}
+
+The waveform losses were added to our run as an adaptation. They are not a claim about the original RMFSR objective. The source paper for this adaptation is linked on page 6.
+
+\newpage
+\heading{6}{One complete optimizer update}
+\textbf{Inputs:} CNN parameters $\theta$, EMA parameters $\bar\theta$, AdamW state, and update index $k$. Effective batch size is 16: four microbatches of four examples.
+
+\begin{enumerate}
+\item Set learning rate $\eta(k)$, diagonal probability $q(k/K)$, and span $\gamma(k/K)$. Clear accumulated parameter gradients.
+\item \textbf{For each of the four microbatches:}
+\begin{enumerate}[label=\alph*.,leftmargin=1.45em,itemsep=3pt]
+\item Generate four target/degraded pairs $(s,d)$ and encode $c=\E(s)$, $y=\E(d)$.
+\item Sample $t,r,\epsilon$ independently per example. Construct $x_t$ and $v_{\mathrm{cond}}$.
+\item Construct the stopped MeanFlow target. If all $r=t$, use $c_\star=c+\sigma_{\min}\epsilon$. Otherwise obtain the detached diagonal tangent, compute the JVP, and use $c_\star=\sg[x_t-tv_{\mathrm{cond}}+t(t-r)J_\theta]$.
+\item Predict $p=F_\theta(x_t,y,t,r)$ with parameter gradients. Compute $\MF=\operatorname{mean}[(p-c_\star)^2]$.
+\item Obtain a differentiable diagonal estimate $F_\theta(x_t,y,t,t)$, reusing $p$ when the entire microbatch is diagonal. Decode it and calculate PESQ loss and negative SI-SDR.
+\item Form $\total=\MF+0.001\PESQ+0.0001\SDR$. Backpropagate $\total/4$ and accumulate gradients.
+\end{enumerate}
+\item Clip the accumulated global gradient norm to 1.0.
+\item Take \textbf{one AdamW step}, with weight decay 0.01.
+\item Update EMA: $\bar\theta\leftarrow0.999\bar\theta+0.001\theta$.
+\item Record losses, update duration, and schedule values. Save or validate when due; increment the completed-update count.
+\end{enumerate}
+
+\subheading{Learning rate and optimizer settings}
+For $K=300000$ and zero-based $k$:
+\[
+ \eta(k)=10^{-4}\min\!\left(1,\frac{k+1}{5000}\right)
+ \left[0.1+0.45\left(1+\cos\!\left(\pi\min(k/K,1)\right)\right)\right].
+\]
+Each example is a 4-second mono crop. AdamW uses moment coefficients $(0.9,0.999)$ and numerical epsilon $10^{-8}$. The update budget and optimizer settings are our experiment choices.
+
+\subheading{Checkpoints, validation, and session continuation}
+\begin{itemize}
+\item Save every \textbf{1,000 updates}, plus improvements and review milestones.
+\item Validate every \textbf{5,000 updates} and at review points: EMA weights, fixed 32-example set, NFE 1, 2, and 5, without backpropagation.
+\item Select the best checkpoint using \textbf{NFE-5 waveform MSE}.
+\item Six-hour sessions resume model, EMA, optimizer, schedule, and update count.
+\end{itemize}
+
+\newpage
+\heading{7}{Inference: restore a degraded recording}
+Given only a degraded waveform $d$, encode $y=\E(d)$ and initialize
+\[
+ x^{(0)}=y+0.3\epsilon.
+\]
+For $N$ network evaluations, use
+\[
+ t_i=1-\frac{i}{N},\qquad r_i=1-\frac{i+1}{N},\qquad i=0,\ldots,N-1.
+\]
+At each step, predict coefficients and apply the flow update:
+\[
+ p_i=F_{\bar\theta}(x^{(i)},y,t_i,r_i),
+\]
+\[
+ \boxed{\begin{aligned}
+ x^{(i+1)}
+ &=x^{(i)}-(t_i-r_i)\frac{x^{(i)}-p_i}{t_i}\\[4pt]
+ &=\frac{r_i}{t_i}x^{(i)}+\left(1-\frac{r_i}{t_i}\right)p_i.
+ \end{aligned}}
+\]
+Return $\widehat s=\D(x^{(N)})$. No clean target, training loss, or JVP is used during inference.
+
+\note{\textbf{With NFE 1}, the returned coefficients are exactly $F_{\bar\theta}(y+0.3\epsilon,y,1,0)$. With more steps, the final update still returns that step's CNN prediction, evaluated at a different intermediate state.}
+
+\heading{}{References and implementation map}
+\subheading{Papers}
+\begin{enumerate}
+\item \href{https://arxiv.org/html/2605.16251v1\#S2}{RMFSR, Sections 2--3}. Core method and data-generation design.
+\item \href{https://arxiv.org/html/2512.10382v1\#S3.SS4}{Investigating training objectives for flow matching-based speech enhancement, Section 3.4}. Basis for our auxiliary waveform-loss adaptation.
+\end{enumerate}
+\subheading{Source locations in the project}
+\begin{itemize}
+\item Pair generation: \texttt{rmfsr/data.py:45}; effects: \texttt{rmfsr/degradations.py:82}.
+\item Transform: \texttt{rmfsr/spectral.py:8}.
+\item Time sampling and MeanFlow loss: \texttt{rmfsr/flow.py:29}.
+\item Waveform losses: \texttt{rmfsr/speech\_fidelity.py:38}.
+\item Training loop: \texttt{rmfsr/train.py:170}.
+\item Configuration: \texttt{configs/balanced-candidate.json}.
+\end{itemize}
+\small
+Remote and local versions of \texttt{flow.py}, \texttt{train.py}, \texttt{data.py}, \texttt{flow\_curriculum.py}, and \texttt{speech\_fidelity.py} had matching SHA-256 hashes when the source notes were prepared. Earlier checkpoints used different recipes. This document describes that verified training phase, not a fresh live-status check.
+\end{document}

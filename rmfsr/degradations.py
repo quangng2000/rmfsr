@@ -43,10 +43,15 @@ def spectral_augment(x,rng,sr):
     taps=signal.firwin2(65,frequencies,gains,fs=sr)
     return signal.fftconvolve(x,taps,mode='same')
 
-def bandlimit(x,rng,sr):
+def bandlimit(x,rng,sr,*,align_fir=False):
     lo=rng.uniform(100,800);hi=rng.uniform(1500,.49*sr)
     kind=rng.choice(['butter','cheby1','cheby2','ellip','bessel','fir'])
-    if kind=='fir':return signal.lfilter(signal.firwin(65,[lo,hi],pass_zero=False,fs=sr),[1],x)
+    if kind=='fir':
+        taps=signal.firwin(65,[lo,hi],pass_zero=False,fs=sr)
+        # Offline augmentation: center this symmetric FIR to remove its 32-sample
+        # group delay without losing the end of the crop. Keep old recipes exact.
+        if align_fir:return signal.fftconvolve(x,taps,mode='same')
+        return signal.lfilter(taps,[1],x)
     args=dict(N=int(rng.integers(2,6)),Wn=[lo,hi],btype='bandpass',fs=sr,output='sos')
     if kind in ('cheby1','ellip'):args['rp']=rng.uniform(.5,3)
     if kind in ('cheby2','ellip'):args['rs']=rng.uniform(15,40)
@@ -74,9 +79,9 @@ def codec_roundtrip(x,rng,sr,ffmpeg):
     valid=(lags>=0)&(lags<min(sr//5,len(decoded)));delay=int(lags[valid][np.argmax(corr[valid])])
     return np.pad(decoded[delay:],(0,len(x)))[:len(x)]
 
-def corrupt(x,rng,sr,ffmpeg=None,codec_enabled=True,extra_quantization=False):
+def corrupt(x,rng,sr,ffmpeg=None,codec_enabled=True,extra_quantization=False,align_fir=False):
     x=np.asarray(x,np.float64).copy();applied=[]
-    if rng.random()<.55:x=bandlimit(x,rng,sr);applied.append('bandlimit')
+    if rng.random()<.55:x=bandlimit(x,rng,sr,align_fir=align_fir);applied.append('bandlimit')
     if rng.random()<.15:
         b,a=signal.iirnotch(rng.uniform(100,6000),rng.uniform(1,15),sr);x=signal.lfilter(b,a,x);applied.append('notch')
     if rng.random()<.3:

@@ -134,11 +134,14 @@ class RMFSR(nn.Module):
         nn.init.zeros_(self.head.conv.bias)
         self.receptive_frames = 1 + 2*sum(encoder_dilations) + 10*sum(tcn_dilations) + len(channels)
     def architecture(self):
-        return dict(decoder_layout=self.decoder_layout, bottleneck_attention=self.bottleneck_attention,
+        architecture = dict(decoder_layout=self.decoder_layout, bottleneck_attention=self.bottleneck_attention,
                     decoder_before_upsample=self.decoder_before_upsample,
                     channels=list(self.channels),
                     encoder_dilations=list(self.encoder_dilations),
                     tcn_dilations=list(self.tcn_dilations))
+        if hasattr(self, 'conditioning_architecture'):
+            architecture['conditioning_architecture'] = self.conditioning_architecture
+        return architecture
 
     def forward(self, x, y, t, r, cache=None):
         emb = self.embedding(t, r)
@@ -165,6 +168,9 @@ class RMFSR(nn.Module):
 
 def model_options(config):
     """Validate architecture settings without allocating model parameters."""
+    from .conditioning import ARCHITECTURE
+    if config.get('conditioning_architecture') not in (None, ARCHITECTURE):
+        raise ValueError(f"Unknown conditioning_architecture: {config['conditioning_architecture']!r}")
     kind = config.get('model_type', 'baseline')
     if kind not in ('baseline', 'efficient-v1'):
         raise ValueError(f'Unknown model_type: {kind!r}')
@@ -183,7 +189,12 @@ def model_options(config):
         options.update(groups=config.get('groups', 16), attention_rank=config.get('attention_rank', 16),
                        folded_width=config.get('folded_width', 448))
         validate_options(**options)
+        if config.get('wavjepa') is not None:
+            from .wavjepa import conditioning_options
+            options['wavjepa'] = conditioning_options(config)
     else:
+        if config.get('wavjepa') is not None:
+            raise ValueError('WavJEPA conditioning requires model_type=efficient-v1')
         if any(key in config for key in ('groups', 'attention_rank', 'folded_width')):
             raise ValueError('Set model_type=efficient-v1 to use groups, attention_rank or folded_width')
         options.update(decoder_layout=config.get('decoder_layout', 'mirror-v2'),
@@ -197,8 +208,21 @@ def model_from_config(config):
     kind, options = model_options(config)
     if kind == 'efficient-v1':
         from .efficient import EfficientRMFSR
-        return EfficientRMFSR(**options)
-    return RMFSR(**options)
+        model = EfficientRMFSR(**options)
+    else:
+        model = RMFSR(**options)
+    return install_conditioning(model, config)
+
+
+def install_conditioning(model, config):
+    """Install the explicit architecture before strict checkpoint state loading."""
+    from .conditioning import ARCHITECTURE, install
+    kind = config.get('conditioning_architecture')
+    if kind is None:
+        return model
+    if kind != ARCHITECTURE:
+        raise ValueError(f'Unknown conditioning_architecture: {kind!r}')
+    return install(model, ConditionedConv)
 
 
 def model_from_checkpoint(checkpoint):
@@ -221,6 +245,7 @@ def model_from_checkpoint(checkpoint):
                   tcn_dilations=architecture.get('tcn_dilations', (1,2,4,8)) if architecture else (1,2,4,8),
                   bottleneck_attention=architecture.get('bottleneck_attention', False) if architecture else False,
                   decoder_before_upsample=architecture.get('decoder_before_upsample', False) if architecture else False)
+    model = install_conditioning(model, config)
     if architecture is not None and architecture != model.architecture():
         raise ValueError('Checkpoint architecture differs from the supported model')
     return model

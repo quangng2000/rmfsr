@@ -12,6 +12,24 @@ Primary evidence: [paper, Figure 1 and section 2.4](https://arxiv.org/html/2605.
 
 ## Figure 2: what is implemented
 
+On 2026-10-14 the user requested the balanced run to return from `demo-eight-v1`
+to `figure2-v3-aligned` at its next natural six-hour session boundary. The queued
+training recipe uses EARS, 1–2 talkers with separate direct/reverberant RIR paths,
+DNS noise, the paper's stated noise/level distributions, the broad degradation
+families below, and DAPS-based studio target processing. The existing validation
+recipe is already `figure2-v3-aligned` and stays fixed. Resume retains weights,
+EMA, AdamW, update count, learning-rate schedule, the previously activated flow
+curriculum, and best-validation selection. It archives the pre-change latest and
+best checkpoints. No signal, immediate trainer restart, corpus scan, benchmark,
+controller replacement, pod restart or GPU release is required.
+
+This is a Figure 2 reproduction, not the authors' original augmentation code.
+Unreported effect probabilities, room/reflection settings, EQ/compressor settings
+and split choices remain documented assumptions; the order-2 RIR and static
+soft-knee compressor remain approximations. Noise/level normals interpret the
+paper's second parameter as a 10 dB standard deviation. Bandpass upper cutoff
+stops at 0.49 times the sample rate for numerical filter design near Nyquist.
+
 | Block | Implementation and status |
 |---|---|
 | One or two clean talkers | EARS, sampled by `SpeechPairs.one`; two talkers in 20% of examples, a chosen probability. |
@@ -55,7 +73,7 @@ Prices/availability vary; storage is extra. Source: live Runpod MCP catalog and 
 
 Use official template `runpod-torch-v280`, image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (verified in the current template catalog). Start with FP32. Do not assume BF16, compilation, or a pretrained CNN can be substituted without checking the MeanFlow derivatives and training quality.
 
-Run `bash scripts/bootstrap-runpod.sh` inside the pod after unpacking this project at `/workspace/rmfsr`. It installs GSM/FFmpeg and the package, verifies PyTorch 2.8/CUDA, and runs tests. It does not create a pod.
+Run `bash scripts/bootstrap-runpod.sh` inside the pod after unpacking this project at `/workspace/rmfsr`. It installs GSM/FFmpeg and the package, verifies PyTorch 2.8/CUDA, and runs tests. The Python environment defaults to `/opt/rmfsr-venv` on the local container disk to avoid network-volume metadata latency; set `RMFSR_VENV` consistently across scripts to override it. Re-run bootstrap after replacing the container. Data and checkpoints remain under `/workspace`. It does not create a pod.
 
 ```bash
 # In a prepared Python environment, from the project root; can run on a CPU host:
@@ -68,7 +86,17 @@ bash scripts/benchmark-gpu.sh
 bash scripts/train-runpod.sh
 ```
 
-The benchmark first measures a full-width, 4-second, batch-4, off-diagonal JVP update (20 timed repeats). It records peak allocated/reserved CUDA memory and compute-only timing. It then runs 100 actual accumulated optimizer updates including data loading, augmentation, codecs, validation and checkpointing. Benchmark-only configs pin flow sampling at 90% schedule progress to exercise the late-training JVP workload; this override is rejected outside an explicitly marked benchmark. The synthetic profile measures one microbatch, while the default real-data benchmark uses four accumulation rounds. Compare seconds/step, examples/second, peak memory and hourly-price × seconds/step / 3600. Reserve memory headroom; don't infer production throughput from the synthetic test alone. Local execution validates CPU/MPS logic, not CUDA performance.
+For an authorized continuous run, start `python -u -m rmfsr.continuous_train --config configs/efficient.json` from the prepared environment. It waits for a completed matching real-data qualification in `runs/qualification`, then starts a fresh full run under `runs/efficient`. Each six-hour checkpointed session automatically resumes until the configured update target is reached. It preserves a fixed copy of the configuration, rejects duplicate controllers with a file lock, and fails on unsuccessful or non-advancing sessions. It does not resume the benchmark checkpoint or stop the billed pod itself. The local supervisor is read-only: keep the GPU allocated through errors, stalls and completion, and release it only on explicit user instruction. Container or host restarts require restoring the environment and relaunching this controller against the persistent checkpoint.
+
+### Prepare complete data before GPU rental
+
+Mount the existing network volume on an authorized Linux CPU pod in the same data center. From `/workspace/rmfsr`, run `bash scripts/bootstrap-runpod.sh --cpu`, activate `/opt/rmfsr-venv/bin/activate`, then run `bash scripts/prepare-data.sh configs/efficient.json`. This reuses complete corpora and saved downloads, applies the DAPS metadata fix, and resumes remaining conversions. A shared-volume file lock prevents duplicate preparation jobs.
+
+The CPU job must finish with `runs/data-preparation/status` equal to `ready`. `runs/data-readiness.json` verifies full EARS speaker partitions, all nine DNS archive manifests and audio hashes/headers, separate noise partitions, DAPS LTAS provenance, and codec dependencies. `runs/data-pipeline-check.json` exercises eight actual indexed training microbatches and two validation batches using real DNS noise, DAPS EQ, augmentation, codecs and spectral transforms at the configured crop/batch size. Eight input/target previews are saved under `runs/data-preparation/previews` for listening. Fixture tests do not establish actual corpus readiness, and the sample batches cannot exhaust every stochastic augmentation.
+
+GPU qualification and benchmark launchers require both successful reports for the matching data recipe and a completed CPU job. They do not download or convert corpora. The trainer still verifies actual input integrity when starting. Passing CPU preparation establishes data readiness; GPU compatibility, memory use and update speed require qualification on the selected GPU. The 300,000-update target stays fixed.
+
+The benchmark defaults to `configs/efficient-benchmark.json`: `efficient-v1`, 4-second crops, microbatch 4, four accumulation rounds. It first measures a complete synthetic off-diagonal JVP optimizer update (20 timed repeats). It records peak allocated/reserved CUDA memory and compute-only timing. It then runs 100 actual accumulated optimizer updates including data loading, augmentation, codecs, validation and checkpointing. Benchmark-only configs pin flow sampling at 90% schedule progress to exercise the late-training JVP workload; this override is rejected outside an explicitly marked benchmark. Both stages honor the same model config and accumulation count. `throughput.json` excludes ten warm-up updates and reports complete optimizer updates per second; individual update timings exclude validation/checkpointing, while the run wall time includes them. The launcher rejects long training configurations. Compare seconds/step, examples/second, peak memory and hourly-price × seconds/step / 3600. Reserve memory headroom; don't infer production throughput from the synthetic test alone. Local execution validates CPU/MPS logic, not CUDA performance.
 
 ## Educated-estimate recipe (separate configuration)
 
@@ -92,7 +120,7 @@ bash /workspace/rmfsr/scripts/benchmark-gpu.sh /workspace/rmfsr/configs/runpod-e
 bash /workspace/rmfsr/scripts/train-runpod.sh /workspace/rmfsr/configs/runpod-estimate.json /workspace/rmfsr/runs/estimate
 ```
 
-The benchmark's synthetic compute-only stage uses one microbatch; use its **real-data training stage** to price the four-microbatch optimizer update. No full training or cloud resource has been started by preparing this recipe.
+The benchmark's synthetic stage now includes all configured accumulation rounds. Use its **real-data stage** to include augmentation, STFT, transfer and EMA overhead; this stage is still a throughput experiment, not a full quality-training run.
 
 ## Recent-iPhone inference estimate
 
@@ -153,3 +181,89 @@ Keep PyTorch 2.8 as the tested correctness baseline. On the selected CUDA GPU, f
 [JAX `jit`](https://docs.jax.dev/en/latest/_autosummary/jax.jit.html) plus [`jvp`](https://docs.jax.dev/en/latest/_autosummary/jax.jvp.html) is a credible alternative for the MeanFlow derivatives. A port would require matching convolutions, padding, SnakeBeta, normalization, Fourier embeddings, random samples, stopped JVP targets, gradients and streaming state. Do not assume a speed gain or rewrite the data pipeline before a measured comparison.
 
 [Triton](https://triton-lang.org/main/index.html) is a GPU-kernel language/compiler, rather than a replacement training framework. PyTorch supports [custom Triton kernels under `torch.compile`](https://docs.pytorch.org/tutorials/recipes/torch_compile_user_defined_triton_kernel_tutorial.html). If profiling identifies memory-bound elementwise work, investigate fusing channel normalization, conditioning or SnakeBeta. Custom training kernels must retain tested forward-mode JVP and backward behavior; a fast inference-only kernel is insufficient for this loss. No CUDA compile, custom-kernel or JAX speedup has been measured yet.
+
+## Direct continuous A100 run
+
+The active A100 run uses `configs/efficient-a100.json` and starts with:
+
+```sh
+python -u -m rmfsr.continuous_train --config configs/efficient-a100.json --run runs/efficient --control runs/continuous --skip-qualification
+```
+
+This explicitly skips the separate throughput qualification and full corpus scan at the user's request. Startup reads saved manifest/index metadata and loads real audio as training consumes it. Checkpoints record `manifest-declared-v1` and `full_audio_verified: false`; cancelled verification is not represented as passed. Other configurations retain full verification by default.
+
+The controller saves and resumes training across six-hour process sessions toward 300,000 optimizer updates. It preserves model, optimizer, EMA, learning-rate schedule, and random state. A training error is recorded and requires diagnosis; the controller never calls Runpod or releases GPU allocation. Checkpoints are also saved at updates 1 and 100, then at the configured regular intervals. Release this GPU only on explicit user instruction. The separately cancelled watch automation remains disabled.
+
+On 2026-10-12, the user requested validation every 5,000 updates starting with the next planned session restart, with checkpoints still every 1,000 updates. Both `configs/efficient-a100.json` and the remote `runs/efficient/training-config.json` have this interval queued. The current trainer retains its in-memory 1,000-update validation interval until it finishes its normal six-hour session; the existing controller then starts the next trainer with the saved configuration. No signal, immediate process restart, or pod lifecycle action is needed. The change record is `runs/cloud-preparation/validation-cadence-change.json`. The active pod is the migrated L40S, despite the configuration's historical A100 filename.
+
+The user also requested the FIR alignment correction at that same planned restart. The queued `figure2-v3-aligned` augmentation profile centers the symmetric 65-tap bandlimit FIR, removing its 32-sample (2 ms at 16 kHz) delay while retaining the full crop. Other filters and random sampling are unchanged. Existing `figure2-v2` workers retain their original behavior even with the new source files installed. The saved configuration explicitly enables the narrow v2-to-v3 resume migration; model weights, EMA, optimizer state, learning-rate schedule, update count and the 300,000-update target continue from the checkpoint.
+
+The corrected profile applies to both training and held-out augmentation. At the transition, the trainer records `augmentation-transition-after-step-XXXXXXXX.json`, preserves the previous best checkpoint as `best-validation-before-alignment-step-XXXXXXXX.pt`, and starts a new best-score threshold for the corrected validation recipe. New metrics carry `augmentation_profile`; scores across this boundary are not exactly comparable. This is a bookkeeping reset, not a model reset. No full-corpus verification, benchmark, extra worker, pod restart, or GPU release is part of this change. Local deployment records are under `runs/cloud-preparation/alignment-fix`.
+
+## Live training dashboard
+
+Run `python3 scripts/live-training-dashboard.py` from this repository, then open
+`http://127.0.0.1:8765` on the same computer. The dashboard reads the current pod
+and SSH endpoint from `runs/cloud-preparation/active-run.json`, using the existing
+SSH key and strict host-key checking. It refreshes every ten seconds while the
+page is visible and shows optimizer updates, recent loss and timing, GPU usage,
+checkpoint file information, and connection freshness.
+
+The server is local and read-only: it cannot start, stop, or change training.
+Closing the page stops its refresh requests; closing the server or sleeping the
+Mac does not stop remote training. To reopen after restarting the Mac, run the
+same command again. No recurring watch automation is required.
+
+The initial remaining-time estimate uses recent update durations, which exclude
+validation and checkpoint writes. After observing at least one minute of progress,
+the estimate uses wall-clock pace over up to 120 refresh samples. This includes
+pauses during that observation window but is still an estimate, not a completion
+guarantee. A stale reading or live process without recent updates is labeled
+explicitly rather than assumed to be healthy training.
+
+## Separate evaluation with paper metrics
+
+`python -m rmfsr.paper_evaluate` evaluates a local, frozen EMA checkpoint on
+SIG2024 test recordings. Install `requirements-eval.txt` in a separate local
+environment. The evaluator uses CPU only and never connects to Runpod or a
+trainer. Copy an immutable `step-XXXXXXXX.pt` checkpoint once; inference and
+scoring then run entirely on the evaluation computer.
+
+The input manifest contains `items`, each with `id`, `audio`, and `transcript`
+paths. The first recorded evaluation uses 20 clips selected with random seed 42
+from the 500 public test recordings linked by the official SIG-Challenge README
+(`ICASSP2023/test_data`, with the corresponding ICASSP2024 transcript directory).
+The pinned source commits, selected IDs, downloaded blob hashes and licenses are
+saved under `runs/paper-evaluation`.
+
+```sh
+python -m rmfsr.paper_evaluate \
+  --checkpoint runs/paper-evaluation/step-00020000.pt \
+  --manifest runs/paper-evaluation/manifest-20.json \
+  --dnsmos-weights runs/paper-evaluation/models/sig_bak_ovr.onnx \
+  --whisper-weights runs/paper-evaluation/large-v3-turbo.pt \
+  --output runs/paper-evaluation/step-00020000-sig20 \
+  --nfes 5 --threads 2
+```
+
+The evaluator compares unprocessed audio with restored audio using DistillMOS,
+standard non-personalized DNSMOS P.835 SIG and Whisper Turbo WER. It processes
+whole recordings at 16 kHz without extra gain or output clipping. Language
+detection is automatic; Whisper's multilingual basic normalizer preserves
+diacritics and removes transcript markup. `<UNKNOWN/>` annotations are removed,
+not scored as wildcard words. Corpus WER is total substitutions, deletions and
+insertions divided by total reference words, rather than mean per-clip WER.
+
+Per-clip audio, scores and transcripts are saved incrementally. Reusing an output
+directory resumes only when the recorded checkpoint, input manifest, evaluation
+settings and code fingerprints match. `results.json` explicitly identifies an
+incomplete run; `provenance.json` records the full setup. Other NFE choices can be
+specified with `--nfes 1 2 5` in a separate output directory.
+
+These are the paper's named automatic metrics using public implementations, not
+an exact reproduction of its evaluation protocol: the paper does not completely
+specify ASR decoding, text normalization or the DNSMOS variant. A 20-clip sample
+cannot be directly compared with the published 500-clip averages. Human ITU P.804
+ratings require listeners, and no substitute is reported for the paper's
+unspecified maximum-bandwidth estimator. One checkpoint also cannot establish a
+training trend. Source: https://arxiv.org/html/2605.16251v1#S4.SS1.

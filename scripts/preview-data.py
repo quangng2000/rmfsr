@@ -22,6 +22,8 @@ pairs=SpeechPairs(cfg['train_manifest'],seconds=cfg['seconds'],sr=cfg['sample_ra
 rows=[]
 for i in range(a.count):
     target,damaged,mask,kinds=pairs.one()
+    if not np.isfinite(target).all() or not np.isfinite(damaged).all():
+        raise ValueError(f'Nonfinite preview example: {i}')
     sf.write(output/f'{i:03d}-target.wav',target,cfg['sample_rate'],subtype='FLOAT')
     sf.write(output/f'{i:03d}-input.wav',damaged,cfg['sample_rate'],subtype='FLOAT')
     np.save(output/f'{i:03d}-missing-mask.npy',mask)

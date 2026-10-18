@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -8,6 +9,48 @@ from .gsm import library_path
 from .data import assert_disjoint
 from .paths import (FileVerifier, INTEGRITY_VERSION, verify_manifest,
                     noise_partition_fingerprints, ltas_fingerprint, _hash_json)
+
+
+def startup_check(config):
+    """Explicit manifest mode records declarations, never claims audio verification."""
+    cfg = dict(config) if isinstance(config, dict) else json.loads(Path(config).read_text())
+    mode = cfg.get('input_verification', 'full')
+    if mode == 'full':
+        return check(cfg)
+    if mode != 'manifest':
+        raise ValueError(f'Unknown input_verification: {mode}')
+    print('Starting with saved manifest metadata; full corpus verification skipped.', flush=True)
+    fingerprints = {'integrity_version': 'manifest-declared-v1', 'full_audio_verified': False}
+    problems = []
+    def digest(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    try:
+        from .model import model_options
+        model_options(cfg)
+        for key in ('train_manifest', 'validation_manifest', 'test_manifest'):
+            if cfg.get(key):
+                fingerprints[key] = digest(cfg[key])
+        assert_disjoint(cfg['train_manifest'], cfg['validation_manifest'])
+        if cfg.get('noise_completion'):
+            completion = Path(cfg['noise_completion'])
+            inventory = json.loads(completion.read_text())
+            shards = {shard: digest(completion.parent / (shard + '.json')) for shard in inventory['shards']}
+            fingerprints['noise_inventory'] = _hash_json({'completion': digest(completion), 'shards': shards})
+        elif not cfg.get('pilot'):
+            raise ValueError('Saved DNS index is required for manifest startup')
+        for key in ('noise_dir', 'validation_noise_dir'):
+            fingerprints[key] = cfg.get(key)
+        if cfg.get('ltas_path'):
+            fingerprints['ltas'] = digest(cfg['ltas_path'])
+        elif not cfg.get('pilot'):
+            raise ValueError('DAPS LTAS is required')
+        library_path()
+        if not get_ffmpeg(cfg.get('ffmpeg')):
+            raise ValueError('ffmpeg missing')
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        problems.append(str(exc))
+    return {'ready': not problems, 'problems': problems, 'input_fingerprints': fingerprints,
+            'verification_mode': 'manifest', 'full_corpus_verified': False}
 
 
 def check(config):
@@ -20,7 +63,9 @@ def check(config):
     except (ValueError, TypeError) as exc:
         problems.append(f'Invalid model configuration: {exc}')
     pilot = cfg.get('pilot', False)
-    verifier = FileVerifier()
+    def progress(label, completed, total):
+        print(f'Verifying {label}: {completed}/{total}', flush=True)
+    verifier = FileVerifier(workers=cfg.get('verification_workers', 8), progress=progress)
     fingerprints = {'integrity_version': INTEGRITY_VERSION}
     expected = {'train_manifest': {f'p{i:03d}' for i in range(1, 100)},
                 'validation_manifest': {f'p{i:03d}' for i in range(100, 104)}}

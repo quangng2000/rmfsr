@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 import urllib.request
 
 
@@ -30,10 +31,21 @@ def download(url, path, expected_size=None, checksum=None, reserve_gib=8):
         if remaining < 0:
             raise ValueError(f'Partial archive is larger than the source: {partial}')
         if remaining:
-            subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error',
-                            '--retry', '5', '--retry-delay', '3', '--connect-timeout', '30',
-                            '--speed-time', '120', '--speed-limit', '1024',
-                            '--continue-at', '-', '--output', str(partial), url], check=True)
+            for attempt in range(6):
+                try:
+                    subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error',
+                                    '--retry', '5', '--retry-delay', '3', '--connect-timeout', '30',
+                                    '--speed-time', '120', '--speed-limit', '1024',
+                                    '--continue-at', '-', '--output', str(partial), url], check=True)
+                    break
+                except subprocess.CalledProcessError as exc:
+                    # Curl's default retries omit truncated transfers (exit 18).
+                    # A fresh invocation resumes from the bytes already on disk.
+                    if exc.returncode not in (18, 28, 35, 52, 55, 56, 92) or attempt == 5:
+                        raise
+                    print(f'Resuming interrupted download {path.name} (retry {attempt + 1}/5)',
+                          flush=True)
+                    time.sleep(min(30, 3 * (attempt + 1)))
         if partial.stat().st_size != expected_size:
             raise ValueError(f'Incomplete archive: {partial}')
         if checksum:
@@ -41,6 +53,7 @@ def download(url, path, expected_size=None, checksum=None, reserve_gib=8):
             if digest(partial, algorithm) != expected:
                 raise ValueError(f'Archive checksum mismatch: {partial}')
         os.replace(partial, path)
+        return path
     if path.stat().st_size != expected_size:
         raise ValueError(f'Cached archive size mismatch: {path}')
     if checksum:

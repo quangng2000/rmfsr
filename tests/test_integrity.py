@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -32,6 +33,56 @@ def manifest(root, name, row):
 
 
 class IntegrityTests(unittest.TestCase):
+    def test_parallel_verification_preserves_order_and_fingerprints(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            rows = [audio_row(root, f'{index}.wav', phase=index / 10) for index in range(20)]
+            path = root / 'train.json'
+            path.write_text(json.dumps(rows))
+            sequential = verify_manifest(path, require_hashes=True, verifier=FileVerifier())
+            progress = []
+            verifier = FileVerifier(workers=4, progress=lambda *item: progress.append(item))
+            parallel = verify_manifest(path, require_hashes=True, verifier=verifier)
+            self.assertEqual(sequential, parallel)
+            self.assertEqual(progress[-1][1:], (20, 20))
+            audio_row(root, '12.wav', phase=2)
+            with self.assertRaisesRegex(ValueError, 'SHA-256 mismatch'):
+                verify_manifest(path, require_hashes=True, verifier=verifier)
+            rows[12]['audio_sha256'] = hashlib.sha256((root / '12.wav').read_bytes()).hexdigest()
+            rows[12]['frames'] += 1
+            path.write_text(json.dumps(rows))
+            with self.assertRaisesRegex(ValueError, 'frame count mismatch'):
+                verify_manifest(path, require_hashes=True, verifier=FileVerifier(workers=4))
+
+    def test_parallel_verification_overlaps_independent_audio_checks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            rows = [audio_row(root, f'{index}.wav', phase=index / 10) for index in range(4)]
+            path = root / 'train.json'
+            path.write_text(json.dumps(rows))
+            verifier = FileVerifier(workers=4)
+            audio = verifier.audio
+            barrier = threading.Barrier(4, timeout=10)
+            def synchronized(row, **kwargs):
+                barrier.wait()
+                return audio(row, **kwargs)
+            with patch.object(verifier, 'audio', side_effect=synchronized):
+                self.assertEqual(verify_manifest(path, verifier=verifier)['files'], 4)
+
+    def test_parallel_noise_checks_preserve_partition_leak_detection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio_row(root, 'train/a.wav')
+            audio_row(root, 'validation/b.wav', phase=.5)
+            serial = noise_partition_fingerprints(root / 'train', root / 'validation')
+            parallel = noise_partition_fingerprints(root / 'train', root / 'validation',
+                                                   verifier=FileVerifier(workers=4))
+            self.assertEqual(serial, parallel)
+            shutil.copyfile(root / 'train/a.wav', root / 'validation/b.wav')
+            with self.assertRaisesRegex(ValueError, 'Noise content leakage'):
+                noise_partition_fingerprints(root / 'train', root / 'validation',
+                                             verifier=FileVerifier(workers=4))
+
     def test_legacy_audio_mutation_changes_fingerprint_including_shared_cache(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -7,5 +7,8 @@ version = "0.1.0"
 description = "RMFSR speech restoration research demo and training pipeline"
 requires-python = ">=3.10"
 dependencies = ["torch==2.8.0", "numpy>=1.26,<3", "scipy>=1.11", "soundfile>=0.12", "matplotlib>=3.8", "pystoi>=0.4", "imageio-ffmpeg==0.6.0"]
+[project.optional-dependencies]
+fidelity = ["torch-pesq==0.1.2", "torchaudio==2.8.0", "torchtyping==0.1.5", "typeguard==2.13.3"]
+wavjepa = ["transformers==4.53.2", "einops==0.8.1"]
 [tool.setuptools.packages.find]
 include = ["rmfsr*"]

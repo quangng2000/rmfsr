@@ -6,6 +6,8 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 import numpy as np
 import soundfile as sf
 import torch
@@ -85,7 +87,9 @@ class PipelineTests(unittest.TestCase):
                     entry = tarfile.TarInfo(name)
                     entry.size = len(audio.getvalue())
                     handle.addfile(entry, io.BytesIO(audio.getvalue()))
-            rows = convert_tar(archive, root, 'fixture', 'daps', 'fixture')
+            with patch('rmfsr.corpus.shutil.disk_usage',
+                       return_value=SimpleNamespace(free=16 * 1024**3)):
+                rows = convert_tar(archive, root, 'fixture', 'daps', 'fixture')
             self.assertEqual(len(rows), 1)
             self.assertFalse((root.parent / 'outside.wav').exists())
             self.assertEqual(Path(rows[0]['path']).parts[0], 'produced')
