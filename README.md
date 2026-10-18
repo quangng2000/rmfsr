@@ -2,6 +2,8 @@
 
 [Listening demo](https://quangng2000.github.io/rmfsr/) · [Page source and reproduction notes](docs/README.md)
 
+[Current training pseudocode and JVP explanation](CURRENT_TRAINING.md) — 18 October snapshot with frozen wavJEPA and the full MeanFlow loss; waveform-fidelity auxiliaries disabled.
+
 This repository contains an **independent implementation attempt** and opt-in experimental architectures. It is not the authors' released model and its results have not been validated against the paper. No official weights or inference code were found in the [RMFSR demo repository](https://github.com/sebraun-msr/realtimemeanflowspeechrestoration). The source paper is [Braun, 2026, arXiv:2605.16251](https://arxiv.org/html/2605.16251v1).
 
 ## Current status, October 4, 2026

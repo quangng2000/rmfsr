@@ -1,5 +1,7 @@
 # RMFSR training algorithm
 
+**Historical snapshot:** this document describes the 15 October phase with waveform-fidelity supervision. See [current training pseudocode and JVP explanation](CURRENT_TRAINING.md) for the 18 October continuation with frozen wavJEPA and no PESQ/SI-SDR auxiliary loss.
+
 **For properly rendered equations, open the [typeset PDF](<output/pdf/RMFSR-training-algorithm.pdf>).** The [LaTeX source](<output/pdf/RMFSR-training-algorithm.tex>) is also editable. This Markdown preview may show raw math syntax.
 
 **Implementation snapshot · verified 15 October 2026**
