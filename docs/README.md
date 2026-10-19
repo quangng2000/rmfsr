@@ -1,6 +1,6 @@
 # RMFSR listening results
 
-Static GitHub Pages listening gallery with a **125,000-update C+ paired example** at NFE 1, 5, 20, and 100, including the clean reference and single-clip STOI scores. The existing eight recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/) retain their **107,713-update** production EMA outputs at NFE 1, 20, 50, and 100. Each example displays its checkpoint separately. Both snapshots use positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). This is a saved experimental gallery, not a live training dashboard or the paper authors' model. No experimental TEMF or FiLM weights were used.
+Static GitHub Pages listening gallery with all **eight recordings** from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/) restored by our **125,000-update production EMA checkpoint** at **NFE 1, 5, 20, and 100**. Every example uses positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). This is a saved experimental gallery, not a live training dashboard or the paper authors' model. No experimental TEMF or FiLM weights were used.
 
 ## Preview
 
@@ -24,9 +24,9 @@ Select **RMS-matched playback** to match the whole-clip RMS of each track to its
 
 The images show linear-frequency, log-magnitude STFTs, with one fixed color scale across all samples and outputs. Switching playback mode also switches images and download links to the corresponding audio. Exact FFT, hop, window, normalization, dB reference, and clipping limits are recorded in the manifest. These display spectrograms are not the model's compressed coefficient tensors.
 
-The synthetic C+ example appears first. The eight author recordings then follow the order of the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/); the wind recording retains the `#sample-07` link. These are the demo's degraded inputs, processed at the model's 16 kHz mono rate.
+The eight recordings follow the order of the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/); the wind recording retains the `#sample-07` link. These are the demo's degraded inputs, processed at the model's 16 kHz mono rate.
 
-No clean references are available for the eight author recordings, so they have no clean-target metric claims. C+ does have a paired clean reference; its STOI values use raw float outputs and are not corpus-level validation scores. No other model's restored output is included. Our inference uses offline WavJEPA conditioning and does not establish real-time performance.
+No clean references are available for the eight recordings, so they have no clean-target metric claims. No other model's restored output is included. Our inference uses offline WavJEPA conditioning and does not establish real-time performance.
 
 ## Updating the snapshot
 
@@ -36,11 +36,12 @@ To reproduce this snapshot locally, supply the trusted checkpoint and the separa
 
 ```sh
 PYTHONPATH=. .venv/bin/python scripts/build-results-page.py \
-  --checkpoint runs/paper-evaluation/scm-107713-author-eight-20261018/checkpoint.pt \
-  --checkpoint-sha256 47d2b90f4f7e9dc549d63cc9a02d8224573ad5b8d75c42e14163406b2a19777f \
-  --run-directory runs/paper-evaluation/scm-107713-author-eight-20261018/mps \
+  --checkpoint runs/paper-evaluation/scm-125000-cplus-20261018/checkpoint.pt \
+  --checkpoint-sha256 42a621b074c28632872314e1147b8f3bef4c6695982b7d7162c1c6229b4c8bc9 \
+  --run-directory runs/paper-evaluation/scm-125000-author-eight-20261018/mps \
+  --source-directory runs/paper-evaluation/author-demo-balanced-20261014-v1 \
   --reuse-features-from runs/paper-evaluation/width1-85000-author-eight-20261017 \
-  --device mps --infer-missing
+  --nfes 1,5,20,100 --device mps --infer-missing
 ```
 
 All outputs for a custom snapshot are regenerated from that checkpoint; only validated input audio and frozen encoder features are reused. Content hashes in asset URLs prevent browsers from replaying an earlier snapshot from cache.
@@ -49,18 +50,9 @@ To add or rebuild only RMS-matched assets from existing raw WAVs, without model 
 
 ```sh
 .venv/bin/python scripts/build-rms-playback.py \
-  --source runs/paper-evaluation/scm-107713-author-eight-20261018/mps
+  --source runs/paper-evaluation/scm-125000-author-eight-20261018/mps
 ```
 
 The full page builder also exports both playback modes automatically.
-
-After rebuilding the eight-recording snapshot, add the saved 125k C+ comparison:
-
-```sh
-.venv/bin/python scripts/build-cplus-demo.py \
-  --source runs/paper-evaluation/scm-125000-cplus-20261018
-```
-
-This exports the saved audio in both playback modes and its spectrograms; it performs no inference. Per-example `checkpoint`, `nfes`, and `playback` fields override the gallery defaults. Existing author-demo assets remain unchanged.
 
 Keep the checkpoint label and provenance in sync with the exported outputs. Review the generated manifest and audio, preview the page, then commit the updated assets. Publishing the page never starts or changes training.

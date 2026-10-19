@@ -10,7 +10,8 @@ Disjoint subsets can be run by separate processes, without building the page:
 With no flags, rebuild public assets from completed local runs.
 For a newer checkpoint, pass --checkpoint, --checkpoint-sha256 and
 --run-directory. Use --reuse-features-from to reuse verified encoder caches
-and --device mps to render on a local Apple GPU.
+and --device mps to render on a local Apple GPU. Use --source-directory
+for external source artifacts and --nfes for four sampling budgets.
 
 No download, pod connection, training change, author restoration output, or
 clean reference is involved. Inference is saved after each NFE. Existing
@@ -389,7 +390,8 @@ def infer_missing(specs: list[dict]) -> None:
     spectral = Spectral(SR)
     for spec in specs:
         validate_features(spec, spectral, feature_record(spec))
-        if spec["index"] == 7 and CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1" and DEVICE == "cpu":
+        if (spec["index"] == 7 and CONDITIONING_ARCHITECTURE == "gaussian-fourier-v1"
+                and DEVICE == "cpu" and set(NFES).issubset(WIND_HASHES)):
             reuse_wind(spec)
     pending = [(spec, [nfe for nfe in NFES if output_record(spec, nfe, required=False) is None]) for spec in specs]
     pending = [(spec, nfes) for spec, nfes in pending if nfes]
@@ -516,7 +518,7 @@ def build(specs: list[dict]) -> dict:
 
 
 def main() -> None:
-    global DEVICE
+    global DEVICE, SOURCE, NFES
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare-features-only", action="store_true", help="Prepare inputs and cache pinned wavJEPA features on CPU, then exit")
@@ -527,9 +529,15 @@ def main() -> None:
     parser.add_argument("--checkpoint-sha256", help="Expected digest recorded when downloading the checkpoint")
     parser.add_argument("--run-directory", type=Path, help="Separate local artifacts directory for this snapshot")
     parser.add_argument("--reuse-features-from", type=Path, help="Existing eight-example directory with verified encoder caches")
+    parser.add_argument("--source-directory", type=Path, default=SOURCE, help="Pinned eight-example source recordings")
+    parser.add_argument("--nfes", default="1,20,50,100", help="Four distinct positive NFE values, comma-separated")
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu", help="Local inference device; no remote GPU use")
     arguments = parser.parse_args()
     DEVICE = arguments.device
+    SOURCE = arguments.source_directory
+    NFES = [int(value) for value in arguments.nfes.split(",")]
+    require(len(NFES) == 4 and len(set(NFES)) == 4 and all(value > 0 for value in NFES),
+            "Provide four distinct positive NFE values")
     custom = (arguments.checkpoint, arguments.checkpoint_sha256, arguments.run_directory)
     require(not any(custom) or all(custom), "A custom snapshot requires checkpoint, SHA-256, and run directory")
     if arguments.checkpoint:

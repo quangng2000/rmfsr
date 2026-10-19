@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <meta name="description" content="Hear the 125,000-update C+ comparison at NFE 1, 5, 20, and 100 alongside its clean reference, plus eight saved author-demo examples from our 107,713-update checkpoint.">
+    <meta name="description" content="Hear all eight speech restoration examples from our 125,000-update checkpoint at NFE 1, 5, 20, and 100, with audio, spectrograms, and optional RMS-matched playback.">
     <meta name="theme-color" content="#101116">
     <title>RMFSR · Listening results</title>
     <link rel="stylesheet" href="styles.css?v=intro-removed-20261017">
     <link rel="stylesheet" href="playback-mode.css?v=rms-matched-20261018">
     <script src="playback-mode.js?v=rms-matched-20261018" defer></script>
-    <script src="app.js?v=cplus-125000-20261018" defer></script>
+    <script src="app.js?v=eight-125000-20261018" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#results">Skip to audio results</a>
@@ -24,7 +24,7 @@
         <section class="listening-section" id="results" aria-labelledby="results-title">
           <div class="section-toolbar">
             <div>
-              <h1 id="results-title">Audio examples</h1>
+              <h1 id="results-title">Eight audio examples</h1>
               <p class="section-helper">Click a spectrogram to play or pause. Use the slider to seek.</p>
             </div>
             <button class="stop-button" id="stop-all" type="button" disabled><span class="stop-symbol" aria-hidden="true"></span>Stop playback</button>
@@ -53,8 +53,8 @@
         <section class="about-results" aria-labelledby="about-title">
           <h2 id="about-title">About this snapshot</h2>
           <div class="about-columns">
-            <p>The paired C+ example uses the 125,000-update checkpoint at NFE 1, 5, 20, and 100. The eight author-demo examples retain their 107,713-update checkpoint at NFE 1, 20, 50, and 100. Within each example, the checkpoint and starting noise stay fixed. Original relative levels are the default; optional RMS matching changes playback gain only.</p>
-            <p>This is an independent, experimental implementation using offline WavJEPA conditioning. C+ includes a clean reference and single-clip STOI scores; it is not a validation-set result. The other eight recordings come from the <a href="https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/">paper authors’ demo</a> and have no clean references. More steps do not necessarily mean better speech.</p>
+            <p>All eight examples use our 125,000-update EMA checkpoint at NFE 1, 5, 20, and 100. Within each example, the checkpoint and starting noise stay fixed. Original relative levels are the default; optional RMS matching changes playback gain only.</p>
+            <p>This is an independent, experimental implementation using offline WavJEPA conditioning. The recordings come from the <a href="https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/">paper authors’ demo</a> and have no clean references, so no clean-target quality scores are reported here. More steps do not necessarily mean better speech.</p>
           </div>
           <details class="technical-details">
             <summary>Audio and spectrogram details</summary>
