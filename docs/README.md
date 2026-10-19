@@ -1,6 +1,6 @@
 # RMFSR listening results
 
-Static GitHub Pages listening gallery with all **eight recordings** from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/) restored by our **125,000-update production EMA checkpoint** at **NFE 1, 5, 20, and 100**. Every example uses positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). This is a saved experimental gallery, not a live training dashboard or the paper authors' model. No experimental TEMF or FiLM weights were used.
+Static GitHub Pages listening gallery with all **eight recordings** from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/) restored by our **145,000-update production EMA checkpoint** at **NFE 1, 5, 20, and 100**. Every example uses positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). This is a saved experimental gallery, not a live training dashboard or the paper authors' model. No experimental TEMF or FiLM weights were used.
 
 ## Preview
 
@@ -35,10 +35,10 @@ No clean references are available for the eight recordings, so they have no clea
 To reproduce this snapshot locally, supply the trusted checkpoint and the separate artifact directory:
 
 ```sh
-PYTHONPATH=. .venv/bin/python scripts/build-results-page.py \
-  --checkpoint runs/paper-evaluation/scm-125000-cplus-20261018/checkpoint.pt \
-  --checkpoint-sha256 42a621b074c28632872314e1147b8f3bef4c6695982b7d7162c1c6229b4c8bc9 \
-  --run-directory runs/paper-evaluation/scm-125000-author-eight-20261018/mps \
+TORCH_DEVICE_BACKEND_AUTOLOAD=0 PYTHONPATH=. .venv/bin/python scripts/build-results-page.py \
+  --checkpoint runs/paper-evaluation/scm-145000-cplus-20261019/checkpoint.pt \
+  --checkpoint-sha256 cb9f082041764fc0c751f1c17a1ae20a40d49eaa1200ac44ca06d68517805838 \
+  --run-directory runs/paper-evaluation/scm-145000-author-eight-20261019/mps \
   --source-directory runs/paper-evaluation/author-demo-balanced-20261014-v1 \
   --reuse-features-from runs/paper-evaluation/width1-85000-author-eight-20261017 \
   --nfes 1,5,20,100 --device mps --infer-missing
@@ -50,7 +50,7 @@ To add or rebuild only RMS-matched assets from existing raw WAVs, without model 
 
 ```sh
 .venv/bin/python scripts/build-rms-playback.py \
-  --source runs/paper-evaluation/scm-125000-author-eight-20261018/mps
+  --source runs/paper-evaluation/scm-145000-author-eight-20261019/mps
 ```
 
 The full page builder also exports both playback modes automatically.
