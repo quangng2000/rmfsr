@@ -1,6 +1,6 @@
 # RMFSR listening results
 
-Static GitHub Pages demo for the 107,713-update production EMA snapshot, using positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). It contains the eight degraded recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/), each restored by our model at NFE 1, 20, 50, and 100, with playable audio and log-magnitude STFT images. The page shows the source inputs and our outputs only. It is a saved experimental snapshot, not a live training dashboard or the paper authors' model. The experimental TEMF weights were not used.
+Static GitHub Pages listening gallery with a **125,000-update C+ paired example** at NFE 1, 5, 20, and 100, including the clean reference and single-clip STOI scores. The existing eight recordings from the [paper authors' demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/) retain their **107,713-update** production EMA outputs at NFE 1, 20, 50, and 100. Each example displays its checkpoint separately. Both snapshots use positional time embeddings and adaptive double normalization (`scm-positional-adn-v1`). This is a saved experimental gallery, not a live training dashboard or the paper authors' model. No experimental TEMF or FiLM weights were used.
 
 ## Preview
 
@@ -20,13 +20,13 @@ GitHub Pages serves the `docs/` folder on `main`. The `.nojekyll` file keeps the
 
 `results.json` records the checkpoint identity, inference settings, sample provenance, and asset paths. Each sample uses the same input and initial noise across its four NFE settings. The default **Original relative levels** mode preserves the existing shared gain and relative loudness.
 
-Select **RMS-matched playback** to match the whole-clip RMS of each output to its example's damaged input. One additional safety gain is shared by all five clips in that example so no export clips. This is a playback-volume adjustment only: it changes neither inference nor the original files. RMS includes speech and noise, so matching it is not a quality score or exact perceived-loudness match. Each recording is matched separately. The manifest records every applied gain, output hash and measured RMS.
+Select **RMS-matched playback** to match the whole-clip RMS of each track to its example's damaged input. One additional safety gain is shared by all tracks in that example so no export clips. This is a playback-volume adjustment only: it changes neither inference nor the original files. RMS includes speech and noise, so matching it is not a quality score or exact perceived-loudness match. Each recording is matched separately. The manifest records every applied gain, output hash and measured RMS.
 
 The images show linear-frequency, log-magnitude STFTs, with one fixed color scale across all samples and outputs. Switching playback mode also switches images and download links to the corresponding audio. Exact FFT, hop, window, normalization, dB reference, and clipping limits are recorded in the manifest. These display spectrograms are not the model's compressed coefficient tensors.
 
-The eight recordings follow the order of the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/); the wind example is sample 7, labeled “wind noise, clipping, noise suppression.” These are the demo's degraded inputs, processed at the model's 16 kHz mono rate. The earlier synthetic C+ example is no longer part of this gallery.
+The synthetic C+ example appears first. The eight author recordings then follow the order of the [source demo](https://sebraun-msr.github.io/realtimemeanflowspeechrestoration/); the wind recording retains the `#sample-07` link. These are the demo's degraded inputs, processed at the model's 16 kHz mono rate.
 
-No clean references are available for these eight recordings, so the page makes no clean-target metric claims. No other model's restored output is included. Our inference uses offline WavJEPA conditioning and does not establish real-time performance.
+No clean references are available for the eight author recordings, so they have no clean-target metric claims. C+ does have a paired clean reference; its STOI values use raw float outputs and are not corpus-level validation scores. No other model's restored output is included. Our inference uses offline WavJEPA conditioning and does not establish real-time performance.
 
 ## Updating the snapshot
 
@@ -53,5 +53,14 @@ To add or rebuild only RMS-matched assets from existing raw WAVs, without model 
 ```
 
 The full page builder also exports both playback modes automatically.
+
+After rebuilding the eight-recording snapshot, add the saved 125k C+ comparison:
+
+```sh
+.venv/bin/python scripts/build-cplus-demo.py \
+  --source runs/paper-evaluation/scm-125000-cplus-20261018
+```
+
+This exports the saved audio in both playback modes and its spectrograms; it performs no inference. Per-example `checkpoint`, `nfes`, and `playback` fields override the gallery defaults. Existing author-demo assets remain unchanged.
 
 Keep the checkpoint label and provenance in sync with the exported outputs. Review the generated manifest and audio, preview the page, then commit the updated assets. Publishing the page never starts or changes training.

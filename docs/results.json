@@ -32,7 +32,7 @@
     "independent_normalization": false,
     "default_mode": "original",
     "rms_matched": {
-      "method": "Match whole-clip RMS to each example's damaged input, then apply one common safety gain to all five clips.",
+      "method": "Match whole-clip RMS to the damaged input, then apply one common safety gain to every track within each example.",
       "peak_limit": 0.95,
       "scope": "per example",
       "reference": "damaged input",
@@ -51,6 +51,172 @@
     "causal_streaming_evaluation": false
   },
   "samples": [
+    {
+      "id": "cplus",
+      "title": "C+ paired example",
+      "description": "125,000 updates · clean reference available",
+      "duration_seconds": 4.0,
+      "nfes": [
+        1,
+        5,
+        20,
+        100
+      ],
+      "references": [
+        {
+          "audio": "assets/audio/cplus/input.wav?v=526b80ee27060b04",
+          "spectrogram": "assets/spectrograms/cplus/input.png?v=332d93b424ac5b52",
+          "source_sha256": "c941301d4f6ee85eecf6adf761a562f8ff13d03ef2df2e6ff03f4b33eadf3744",
+          "audio_sha256": "526b80ee27060b043e0e4959b023c2d7fbe9e6410a334e9129cf150792f48b70",
+          "spectrogram_sha256": "332d93b424ac5b52d026835c5a76dbb9d2724f26d67d8cba101a52d010db8d72",
+          "stoi": 0.877042422171974,
+          "kind": "input",
+          "label": "Damaged input",
+          "matched": {
+            "audio": "assets/audio/cplus/input-rms-matched.wav?v=3788898f05d68d2f",
+            "spectrogram": "assets/spectrograms/cplus/input-rms-matched.png?v=ad6c4683bd89c039",
+            "audio_sha256": "3788898f05d68d2fcbf92b3c5ad11f9a7d4c520667ad95e46d4509eb5add0955",
+            "spectrogram_sha256": "ad6c4683bd89c03986f810fa63b62decacc2b40b2aa769896628be936beff167",
+            "gain_db": 0.0,
+            "source_rms_dbfs": -28.280656463155957,
+            "rms_dbfs": -28.280680184594672,
+            "rms": 0.03854481723669173,
+            "peak": 0.16375732421875
+          }
+        },
+        {
+          "audio": "assets/audio/cplus/clean.wav?v=5395c727062b3272",
+          "spectrogram": "assets/spectrograms/cplus/clean.png?v=b2b9920ccb666f0e",
+          "source_sha256": "de4bdf83b6e28dcca993a9fce21117429ba837b55f3708e6d5ebdfb8a270712d",
+          "audio_sha256": "5395c727062b3272284c8d5c2819919bb4957b23a34077c24f2e7afefcbc3b6d",
+          "spectrogram_sha256": "b2b9920ccb666f0ea473dc64e431863c450612b49bb1bcca650c80f9693714e7",
+          "stoi": 0.9999999999999998,
+          "kind": "clean",
+          "label": "Clean reference",
+          "matched": {
+            "audio": "assets/audio/cplus/clean-rms-matched.wav?v=fe8532bc0bf6e29d",
+            "spectrogram": "assets/spectrograms/cplus/clean-rms-matched.png?v=2e70894a91221dd7",
+            "audio_sha256": "fe8532bc0bf6e29d0a533d33f3291ae336b9ba5106aab396427de6a933313c13",
+            "spectrogram_sha256": "2e70894a91221dd7372c65f9b6f81fcff837fdef28f63df3890dfd88f2a8e4bc",
+            "gain_db": -3.2806564610478834,
+            "source_rms_dbfs": -25.000000002108077,
+            "rms_dbfs": -28.28067542311394,
+            "rms": 0.03854483836641621,
+            "peak": 0.319488525390625
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "audio": "assets/audio/cplus/nfe1.wav?v=0ecdc899ce169d00",
+          "spectrogram": "assets/spectrograms/cplus/nfe1.png?v=f952a31f96bc9e51",
+          "source_sha256": "0d9c6d3e49cab0e7c90fadde32901c703b760effa7efa0b7b2cbb3f504153d65",
+          "audio_sha256": "0ecdc899ce169d00340b2a664db340410ca30397ee7acb93a88f2bf059338719",
+          "spectrogram_sha256": "f952a31f96bc9e51be4ed325caf3cbaaf5650087282fa4b37099f0dd28cc924c",
+          "stoi": 0.6975232785078294,
+          "nfe": 1,
+          "label": "NFE 1",
+          "matched": {
+            "audio": "assets/audio/cplus/nfe1-rms-matched.wav?v=9fd10674d0b7d48c",
+            "spectrogram": "assets/spectrograms/cplus/nfe1-rms-matched.png?v=7a308f90d31e5076",
+            "audio_sha256": "9fd10674d0b7d48c22ec38f7131e518a99983bf758634ce3645e3ac6acd60133",
+            "spectrogram_sha256": "7a308f90d31e5076feb6f84fba74d29b12056117b70add4253b75055343172a8",
+            "gain_db": -3.9696474637211887,
+            "source_rms_dbfs": -24.311008999434772,
+            "rms_dbfs": -28.280678101999193,
+            "rms": 0.03854482647849366,
+            "peak": 0.326416015625
+          }
+        },
+        {
+          "audio": "assets/audio/cplus/nfe5.wav?v=bf360548afb94352",
+          "spectrogram": "assets/spectrograms/cplus/nfe5.png?v=3e7cd08f8b5a54f0",
+          "source_sha256": "98ab2abd4dc5cd65621675e50f5989bd5f7db9074146acddf8aabcc2c44b2e72",
+          "audio_sha256": "bf360548afb94352eb1d048eef4b9c7bf7c3c8303553b9e33ffb68f22553e3f8",
+          "spectrogram_sha256": "3e7cd08f8b5a54f03432c0908b5c0c0dc050a399ddc2d649fbf4e4ca8fd619cf",
+          "stoi": 0.7666264150597804,
+          "nfe": 5,
+          "label": "NFE 5",
+          "matched": {
+            "audio": "assets/audio/cplus/nfe5-rms-matched.wav?v=10e827282fc3879c",
+            "spectrogram": "assets/spectrograms/cplus/nfe5-rms-matched.png?v=5b34ed188de667f0",
+            "audio_sha256": "10e827282fc3879cd4f0f3903f2a3c5c725a48d4bb3ca35f2f16423ae86d8057",
+            "spectrogram_sha256": "5b34ed188de667f078e0b7ca09b6515fcdab3b1b63f905fc49ac1762bd27177d",
+            "gain_db": -6.472483262057387,
+            "source_rms_dbfs": -21.808173201098576,
+            "rms_dbfs": -28.280675559148882,
+            "rms": 0.03854483776274232,
+            "peak": 0.315277099609375
+          }
+        },
+        {
+          "audio": "assets/audio/cplus/nfe20.wav?v=e66b9b1abec5b19b",
+          "spectrogram": "assets/spectrograms/cplus/nfe20.png?v=3d8ff4d0bf9bffeb",
+          "source_sha256": "36a68ddd47f9c45b272d657fc41133ff0ab4166ba78371c4deac5d6a905fad38",
+          "audio_sha256": "e66b9b1abec5b19b73b23373ef39d1570a817a32df09ed29d4f2af60c19a4f91",
+          "spectrogram_sha256": "3d8ff4d0bf9bffebaa86619a60a3ce441c3d704947af10dcee5f95d71d2d0cde",
+          "stoi": 0.8120972114303783,
+          "nfe": 20,
+          "label": "NFE 20",
+          "matched": {
+            "audio": "assets/audio/cplus/nfe20-rms-matched.wav?v=295ac9db8f76511b",
+            "spectrogram": "assets/spectrograms/cplus/nfe20-rms-matched.png?v=fcac96ed83ef3f7d",
+            "audio_sha256": "295ac9db8f76511b638e7ff998b79b5307407694f14c832cb48492413e485d46",
+            "spectrogram_sha256": "fcac96ed83ef3f7da38e2ae249b838c04f69df9cf4842831f3b5a0d59bfd37b3",
+            "gain_db": -9.530261281631114,
+            "source_rms_dbfs": -18.750395181524844,
+            "rms_dbfs": -28.280686052143388,
+            "rms": 0.03854479119865465,
+            "peak": 0.290985107421875
+          }
+        },
+        {
+          "audio": "assets/audio/cplus/nfe100.wav?v=2168a3697423a404",
+          "spectrogram": "assets/spectrograms/cplus/nfe100.png?v=e0876c67f331efd7",
+          "source_sha256": "a348177743ed979cc69613de29be5e1eed3e5dd1a3fe489fad3717ccb6c19a20",
+          "audio_sha256": "2168a3697423a4045f0a1506d514d5081b0e4ba6442e46643e9522227f6a6c49",
+          "spectrogram_sha256": "e0876c67f331efd78f500a31884206cc13e57c7c441cbbe73d5135ea24e24b91",
+          "stoi": 0.8392195063307949,
+          "nfe": 100,
+          "label": "NFE 100",
+          "matched": {
+            "audio": "assets/audio/cplus/nfe100-rms-matched.wav?v=aac3223fb0982a6e",
+            "spectrogram": "assets/spectrograms/cplus/nfe100-rms-matched.png?v=f54b009b586e3942",
+            "audio_sha256": "aac3223fb0982a6e7b73b674671549758adb4cdb1490fb12821870ff709b4ea9",
+            "spectrogram_sha256": "f54b009b586e39427f249c6641cf503dd4af77cbd6f6c6de86eafcf6236d9953",
+            "gain_db": -11.445023639244393,
+            "source_rms_dbfs": -16.835632823911567,
+            "rms_dbfs": -28.280679176242135,
+            "rms": 0.03854482171139359,
+            "peak": 0.3018798828125
+          }
+        }
+      ],
+      "checkpoint": {
+        "step": 125000,
+        "weights": "EMA",
+        "sha256": "42a621b074c28632872314e1147b8f3bef4c6695982b7d7162c1c6229b4c8bc9",
+        "conditioning_architecture": "scm-positional-adn-v1"
+      },
+      "playback": {
+        "common_gain_db": -1.486489060998365
+      },
+      "inference": {
+        "device": "cpu",
+        "noise_seed": 1510001,
+        "input_sha256": {
+          "input": "789545d22f1aedaf3774ffe0eb5cb21f9a0962c56ce7c580a946d28ef89cf661",
+          "clean": "57a56ee865125f2d2bf2f61ef6638383f9d12c287fbdb171a08d3c8cae2a7bb8"
+        },
+        "cached_features_sha256": "b32aeb7107dd4b6b496509607843622f4f88aca51c9c2a6dd5c150760e8480a6"
+      },
+      "source_note": "Synthetic paired C+ example. STOI is measured on this one clip, not the validation set. All outputs use the production EMA; no experimental FiLM.",
+      "rms_matched": {
+        "reference": "damaged input",
+        "common_safety_gain_db": 0.0,
+        "maximum_rms_spread_db": 1.0629029446818095e-05
+      }
+    },
     {
       "id": "sample-01",
       "title": "Sample 1 (band-limitation, background noise)",

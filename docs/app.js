@@ -60,6 +60,7 @@
     const trackId = `${sample.id}-${group}-${track.nfe ?? track.kind}`;
     const labelRow = element("div", "track-label-row");
     const heading = element("h4", "", track.label);
+    if (Number.isFinite(track.stoi)) heading.append(element("small", "track-score", ` · STOI ${track.stoi.toFixed(3)}`));
     heading.id = `${trackId}-title`;
     card.setAttribute("aria-labelledby", heading.id);
     const download = element("a", "track-download", "WAV ↓");
@@ -308,7 +309,7 @@
     section.append(header);
     const cleanAvailable = sample.references.some((track) => track.kind === "clean");
     section.append(makeGroup("Source audio", cleanAvailable ? "Input and clean reference" : "No clean reference is available", sample.references, sample, "references"));
-    section.append(makeGroup("Our restored outputs", "Same checkpoint · same starting noise", sample.outputs, sample, "outputs"));
+    section.append(makeGroup("Our restored outputs", `${sample.checkpoint.step.toLocaleString("en-US")} updates · ${sample.checkpoint.weights} · same starting noise`, sample.outputs, sample, "outputs"));
     if (sample.source_note) {
       const note = element("p", "source-note", sample.source_note);
       if (sample.source_url) {
@@ -323,11 +324,13 @@
 
   function validateManifest(data) {
     if (data.schema_version !== 1 || !Array.isArray(data.samples) || !data.samples.length) throw new Error("Unsupported results manifest.");
-    if (!data.checkpoint || data.nfes.join(",") !== "1,20,50,100") throw new Error("Results are incomplete.");
+    if (!data.checkpoint || !Array.isArray(data.nfes)) throw new Error("Results are incomplete.");
     for (const sample of data.samples) {
       if (!Number.isFinite(sample.duration_seconds) || sample.duration_seconds <= 0) throw new Error("Invalid sample duration.");
       if (!Array.isArray(sample.references) || !Array.isArray(sample.outputs)) throw new Error("Missing audio tracks.");
-      if (sample.outputs.map((track) => track.nfe).join(",") !== data.nfes.join(",")) throw new Error("Missing sampling result.");
+      const nfes = sample.nfes ?? data.nfes;
+      if (!nfes.length || nfes.some(n => !Number.isInteger(n) || n < 1) || new Set(nfes).size !== nfes.length) throw new Error("Invalid sampling settings.");
+      if (sample.outputs.map((track) => track.nfe).join(",") !== nfes.join(",")) throw new Error("Missing sampling result.");
       for (const track of [...sample.references, ...sample.outputs]) {
         if (!track.audio || !track.spectrogram || !track.label) throw new Error("Missing audio asset.");
       }
@@ -344,22 +347,26 @@
       if (!response.ok) throw new Error(`Manifest returned ${response.status}`);
       const data = await response.json();
       validateManifest(data);
-      const stepLabel = data.checkpoint.step.toLocaleString("en-US");
-      document.querySelector(".section-helper").textContent = `${stepLabel}-update checkpoint · Click a spectrogram to play or pause. Use the slider to seek.`;
+      data.samples.forEach(sample => { sample.checkpoint ??= data.checkpoint; });
+      const checkpoints = [...new Map(data.samples.map(sample => [sample.checkpoint.sha256, sample.checkpoint])).values()];
+      const stepLabel = checkpoints.map(checkpoint => checkpoint.step.toLocaleString("en-US")).join(" / ");
+      document.querySelector(".section-helper").textContent = `Checkpoint shown per example · Click a spectrogram to play or pause. Use the slider to seek.`;
       const spectrum = data.spectrogram;
       const gainDb = data.playback?.common_gain_db;
       const gainLabel = Number.isFinite(gainDb)
         ? `${gainDb < 0 ? "−" : gainDb > 0 ? "+" : ""}${Math.abs(gainDb).toFixed(1)} dB`
         : "not recorded";
-      document.getElementById("legend-note").textContent = `Shared playback gain ${gainLabel} · relative loudness preserved`;
+      const mixedSnapshots = checkpoints.length > 1;
+      document.getElementById("legend-note").textContent = mixedSnapshots ? "Shared gain within each example · relative loudness preserved" : `Shared playback gain ${gainLabel} · relative loudness preserved`;
       document.getElementById("scale-label").textContent = `${spectrum.min_db} to ${spectrum.max_db} dB`;
       document.querySelector(".color-scale").dataset.colormap = spectrum.colormap || "viridis";
-      document.getElementById("spectrogram-details").textContent = `Audio: ${data.sample_rate.toLocaleString("en-US")} Hz, mono. Shared playback gain: ${gainLabel}, applied uniformly to every input and output; no per-clip normalization. Spectrograms: ${spectrum.n_fft}-sample STFT windows with a ${spectrum.hop_length}-sample hop; log magnitude displayed from ${spectrum.min_db} to ${spectrum.max_db} dB. ${spectrum.reference || "A shared reference magnitude of 1 is used for all window-normalized spectrograms."}`;
+      document.getElementById("spectrogram-details").textContent = `Audio: ${data.sample_rate.toLocaleString("en-US")} Hz, mono. ${mixedSnapshots ? "One shared playback gain within each example; gains are recorded in the manifest" : `Shared playback gain: ${gainLabel}, applied uniformly to every input and output`}; no per-clip normalization. Spectrograms: ${spectrum.n_fft}-sample STFT windows with a ${spectrum.hop_length}-sample hop; log magnitude displayed from ${spectrum.min_db} to ${spectrum.max_db} dB. ${spectrum.reference || "A shared reference magnitude of 1 is used for all window-normalized spectrograms."}`;
       const checkpointDetails = document.getElementById("checkpoint-details");
       const conditioning = data.checkpoint.conditioning_architecture === "scm-positional-adn-v1"
         ? "Positional time embeddings and adaptive double normalization"
         : `Gaussian Fourier frequency width ${data.checkpoint.frequency_width}`;
-      checkpointDetails.replaceChildren(document.createTextNode(`${stepLabel} optimizer updates · ${data.checkpoint.weights} weights · ${conditioning}. Checkpoint SHA-256: `), element("code", "", data.checkpoint.sha256));
+      checkpointDetails.replaceChildren(document.createTextNode(`${stepLabel} optimizer updates · EMA weights · ${conditioning}. `));
+      checkpoints.forEach(checkpoint => checkpointDetails.append(document.createTextNode(`${checkpoint.step.toLocaleString("en-US")} SHA-256: `), element("code", "", checkpoint.sha256), document.createElement("br")));
       const samples = document.getElementById("samples");
       const nav = document.getElementById("sample-navigation");
       stopPlayback();
